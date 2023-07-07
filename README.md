@@ -1,5 +1,11 @@
 # Home Assistant - Centro de Gerenciamento de Emergências Climáticas SP
 
+## Sobre
+
+- Integração permite visualizar as condições climáticas de uma determinada estação meteorológica da Cidade de São Paulo (Brasil)
+
+- Todos os dados são provenientes do site do <a href="https://www.cgesp.org/v3/">CGE - SP</a>
+
 ## Instalação
 - [x] Necessário ter o HACS instalado: https://github.com/hacs/integration
 
