@@ -1,0 +1,15 @@
+{
+  "domain": "cge",
+  "name": "CGE - SP",
+  "codeowners": [
+    "@luyzfernando08"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://www.home-assistant.io/integrations/cge",
+  "homekit": {},
+  "iot_class": "cloud_polling",
+  "requirements": ["beautifulsoup4==4.11.1"],
+  "ssdp": [],
+  "zeroconf": []
+}

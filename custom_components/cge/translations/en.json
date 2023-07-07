@@ -1,0 +1,19 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Device is already configured"
+        },
+        "error": {
+            "cannot_connect": "Failed to connect",
+            "invalid_auth": "Invalid authentication",
+            "unknown": "Unexpected error"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "ESTACAO_METEOROLOGICA": "Selecione uma esta\u00e7\u00e3o meteorol\u00f3gica"
+                }
+            }
+        }
+    }
+}
