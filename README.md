@@ -25,7 +25,7 @@ https://github.com/luyzfernando08/ha-cgesp
 
 A adição da integração à sua instância do Home Assistant pode ser feita através da interface do usuário, usando este botão:
 
-<a href="https://my.home-assistant.io/redirect/config_flow_start?domain=cge" rel="CGE - SP">![Foo](https://my.home-assistant.io/badges/config_flow_start.svg)</a>
+<a href="https://my.home-assistant.io/redirect/config_flow_start?domain=cgesp" rel="CGE - SP">![Foo](https://my.home-assistant.io/badges/config_flow_start.svg)</a>
 
 ### Configuração Manual:
 
