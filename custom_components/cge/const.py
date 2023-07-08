@@ -1,6 +1,6 @@
 """Constants for the Centro de Gerenciamento de Emergências Climáticas da Prefeitura de São Paulo integration."""
 
-DOMAIN = "cge"
+DOMAIN = "cgesp"
 ENTRADA_ESTACAO_METEOROLOGICA = "ESTACAO_METEOROLOGICA"
 ICON = "mdi:car"
 ESTACOES = {
