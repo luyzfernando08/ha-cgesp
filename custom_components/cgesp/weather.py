@@ -1,5 +1,5 @@
 import logging
-from homeassistant.components.cge.cge_weather_coordinator import CgeWeatherCoordinator
+from .cge_weather_coordinator import CgeWeatherCoordinator
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType
@@ -8,8 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.components.weather import Forecast, WeatherEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ESTACOES, ICON
-from .cge_scrape import CgeScrape
+from .const import DOMAIN, ESTACOES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +23,6 @@ async def async_setup_entry(
         hass=hass, config_entry=entry
     )
     _LOGGER.debug(f"Estação selecionado: {estacaoId}")
-    # dados = await CgeScrape().get(hass=hass, estacaoId=estacaoId)
 
     await async_add_entities(
         [CgeWeather(coordinator=coordinator, estacaoId=estacaoId)],
@@ -45,10 +43,6 @@ class CgeWeather(CoordinatorEntity[CgeWeatherCoordinator], WeatherEntity):
     @property
     def name(self) -> str:
         return ESTACOES[self.estacaoId]
-
-    # @property
-    # def icon(self) -> str:
-    #     return ICON
 
     @property
     def condition(self) -> str | None:

@@ -1,6 +1,6 @@
 from datetime import timedelta
 from random import randrange
-from homeassistant.components.cge.cge_data import CgeData
+from .cge_data import CgeData
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator

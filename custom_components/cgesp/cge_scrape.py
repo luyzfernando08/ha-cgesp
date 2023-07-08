@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 import re
 import logging
 from datetime import datetime
-from homeassistant.components.cge.cge_data import CgeData
+from .cge_data import CgeData
 from .cge_data_forecast import CgeForecastData
 
 from homeassistant.core import HomeAssistant

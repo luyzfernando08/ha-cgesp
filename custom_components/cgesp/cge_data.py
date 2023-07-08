@@ -1,7 +1,6 @@
 from __future__ import annotations
 from ast import List
-
-from homeassistant.components.cge.cge_data_forecast import CgeForecastData
+from .cge_data_forecast import CgeForecastData
 
 
 class CgeData:
