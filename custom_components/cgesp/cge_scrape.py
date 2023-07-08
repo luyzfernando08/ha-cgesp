@@ -52,7 +52,8 @@ def __de_para_ceu__(ceu: str):
         return "pouring"
     elif ceu == "Nublado com chuva":
         return "rainy"
-
+    elif ceu == "Nublado":
+        return "cloudy"
 
 class CgeScrape:
     def __init__(self, hass: HomeAssistant, estacaoId: int) -> None:
@@ -82,7 +83,6 @@ class CgeScrape:
 
             forecasts = []
             for index, tabela in enumerate(soup.select(".col-previsao-simples")):
-                # forecastDia = forecast[f"dia{index+1}"]
                 forecast = CgeForecastData()
                 for coluna in tabela.select(".data-prev"):
                     dia = coluna.text.replace("\n", "").strip()
@@ -99,16 +99,6 @@ class CgeScrape:
                 forecast.umidade = __texto_para_numero__(
                     tabela.select_one(".umid-min").text
                 )
-
-                # forecastDia["temperaturaMaxima"] = __texto_para_numero__(
-                #     tabela.select_one(".temp-max").text
-                # )
-                # forecastDia["umidadeMinima"] = __texto_para_numero__(
-                #     tabela.select_one(".umid-min").text
-                # )
-                # forecastDia["umidadeMaxima"] = __texto_para_numero__(
-                #     tabela.select_one(".umid-max").text
-                # )
 
                 forecast.condicaoTempo = __de_para_ceu__(
                     tabela.select_one(__pega_periodo_dia__())
