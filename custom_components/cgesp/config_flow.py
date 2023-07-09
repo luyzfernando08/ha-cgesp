@@ -31,6 +31,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         if user_input is not None:
+            await self.async_set_unique_id(f"cge_{user_input.get(ENTRADA_ESTACAO_METEOROLOGICA)}")
+            self._abort_if_unique_id_configured()
             return self.async_create_entry(
                 title=ESTACOES[user_input.get(ENTRADA_ESTACAO_METEOROLOGICA)],
                 data={"ESTACAO_ID": user_input.get(ENTRADA_ESTACAO_METEOROLOGICA)},

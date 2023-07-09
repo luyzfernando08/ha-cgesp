@@ -18,31 +18,32 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    estacaoId: int = entry.data.get("ESTACAO_ID")
+    estacao_id: int = entry.data.get("ESTACAO_ID")
     coordinator: CgeWeatherCoordinator = CgeWeatherCoordinator(
         hass=hass, config_entry=entry
     )
-    _LOGGER.debug(f"Estação selecionado: {estacaoId}")
+    _LOGGER.debug(f"Estação selecionado: {estacao_id}")
 
-    await async_add_entities(
-        [CgeWeather(coordinator=coordinator, estacaoId=estacaoId)],
+    async_add_entities(
+        [CgeWeather(coordinator=coordinator, estacao_id=estacao_id)],
         update_before_add=True,
     )
 
 
 class CgeWeather(CoordinatorEntity[CgeWeatherCoordinator], WeatherEntity):
-    def __init__(self, coordinator: CgeWeatherCoordinator, estacaoId: int) -> None:
-        self.estacaoId = estacaoId
+    def __init__(self, coordinator: CgeWeatherCoordinator, estacao_id: int) -> None:
+        self.estacao_id = estacao_id
         self.coordinator = coordinator
         super().__init__(coordinator)
 
+
     @property
-    def unique_id(self) -> str:
-        return f"cge_{self.estacaoId}"
+    def unique_id(self) -> str | None:
+        return f"cge_{self.estacao_id}"
 
     @property
     def name(self) -> str:
-        return ESTACOES[self.estacaoId]
+        return ESTACOES[self.estacao_id]
 
     @property
     def condition(self) -> str | None:

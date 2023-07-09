@@ -48,11 +48,9 @@ def __de_para_ceu__(ceu: str):
         return "sunny"
     elif ceu == "Poucas nuvens":
         return "partlycloudy"
-    elif ceu == "Chuvisco":
-        return "pouring"
-    elif ceu == "Nublado com chuva":
+    elif ceu == "Nublado com chuva" or ceu == "Chuvisco":
         return "rainy"
-    elif ceu == "Nublado":
+    elif ceu == "Nublado" or ceu == "Encoberto":
         return "cloudy"
 
 class CgeScrape:
@@ -62,7 +60,6 @@ class CgeScrape:
 
     async def get(self) -> CgeData:
         def get():
-            _LOGGER.warning(f"Pesquisando estação {self.estacaoId}")
             url = f"https://www.cgesp.org/v3/estacao.jsp?POSTO={self.estacaoId}"
 
             response = requests.get(url, timeout=60000)
@@ -114,7 +111,5 @@ class CgeScrape:
             return estacao
 
         response = await self.hass.async_add_executor_job(get)
-
-        _LOGGER.warning(f"Estação {self.estacaoId} => {response}")
 
         return response
