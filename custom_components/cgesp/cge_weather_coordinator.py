@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 class CgeWeatherCoordinator(DataUpdateCoordinator["CgeData"]):
     def __init__(self, hass: HomeAssistant, config_entry: ConfigEntry) -> None:
         self.scraper = CgeScrape(
-            hass=hass, estacaoId=config_entry.data.get("ESTACAO_ID")
+            hass=hass, estacao_id=config_entry.data.get("ESTACAO_ID")
         )
         update_interval = timedelta(minutes=randrange(61, 75))
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=update_interval)

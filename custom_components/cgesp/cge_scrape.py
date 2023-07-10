@@ -1,5 +1,7 @@
 from __future__ import annotations
 from ast import List
+from enum import Enum
+
 
 import requests
 from bs4 import BeautifulSoup
@@ -13,6 +15,11 @@ from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
+TEMPERATURA:str = "Temperatura"
+UMIDADE:str = "Umidade"
+VENTO:str = "Vento"
+PRESSAO:str = "Pressão"
+
 
 def __texto_para_numero__(texto: str) -> int:
     valor = re.search(r"\d+\.\d+", texto)
@@ -22,10 +29,10 @@ def __texto_para_numero__(texto: str) -> int:
     return float(valor.group())
 
 
-def __pega_informacao__(soup: BeautifulSoup, indexColuna: int, linha: int = 1):
+def __pega_informacao__(soup: BeautifulSoup, index_coluna: int, linha: int = 1):
     return __texto_para_numero__(
         soup.select_one("table")
-        .select("table")[indexColuna]
+        .select("table")[index_coluna]
         .select_one(f"tr:nth-child({linha})")
         .text
     )
@@ -54,24 +61,36 @@ def __de_para_ceu__(ceu: str):
         return "cloudy"
 
 class CgeScrape:
-    def __init__(self, hass: HomeAssistant, estacaoId: int) -> None:
+    def __init__(self, hass: HomeAssistant, estacao_id: int) -> None:
         self.hass = hass
-        self.estacaoId = estacaoId
+        self.estacao_id = estacao_id
 
     async def get(self) -> CgeData:
         def get():
-            url = f"https://www.cgesp.org/v3/estacao.jsp?POSTO={self.estacaoId}"
+            url = f"https://www.cgesp.org/v3/estacao.jsp?POSTO={self.estacao_id}"
 
             response = requests.get(url, timeout=60000)
 
             soup = BeautifulSoup(response.text, "html.parser")
 
+            colunas = [TEMPERATURA,UMIDADE,VENTO,PRESSAO]
+
+            index_por_coluna = {}
+            for index,item in enumerate(soup.select('table tr th')):
+                for coluna in colunas:
+                    if item.text == coluna:
+                        index_por_coluna[coluna] = index
+
             estacao = CgeData()
 
-            estacao.temperatura = __pega_informacao__(soup, 1)
-            estacao.umidade = __pega_informacao__(soup, 2)
-            estacao.vento = __pega_informacao__(soup, 3, 2)
-            estacao.pressaoDoAr = __pega_informacao__(soup, 4)
+            if TEMPERATURA in index_por_coluna:
+                estacao.temperatura = __pega_informacao__(soup, index_por_coluna[TEMPERATURA])
+            if UMIDADE in index_por_coluna:
+                estacao.umidade = __pega_informacao__(soup, index_por_coluna[UMIDADE])
+            if VENTO in index_por_coluna:
+                estacao.vento = __pega_informacao__(soup, index_por_coluna[VENTO],3)
+            if PRESSAO in index_por_coluna:
+                estacao.pressaoDoAr = __pega_informacao__(soup, index_por_coluna[PRESSAO])
 
             url = "https://www.cgesp.org/v3/previsao_estendida.jsp"
             response = requests.get(url, timeout=60000)
