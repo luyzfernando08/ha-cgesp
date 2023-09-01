@@ -55,7 +55,7 @@ def __de_para_ceu__(ceu: str):
         return "sunny"
     elif ceu == "Poucas nuvens":
         return "partlycloudy"
-    elif ceu == "Nublado com chuva" or ceu == "Chuvisco" or ceu == "Pancadas isoladas" or ceu == "Pancadas de chuva":
+    elif ceu == "Chuva" or ceu == "Nublado com chuva" or ceu == "Chuvisco" or ceu == "Pancadas isoladas" or ceu == "Pancadas de chuva":
         return "rainy"
     elif ceu == "Nublado" or ceu == "Encoberto":
         return "cloudy"
