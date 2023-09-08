@@ -1,11 +1,11 @@
 import logging
 from .cge_weather_coordinator import CgeWeatherCoordinator
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.components.weather import Forecast, WeatherEntity
+from homeassistant.components.weather import ATTR_FORECAST_TIME,ATTR_FORECAST_HUMIDITY,ATTR_FORECAST_TEMP_LOW,ATTR_FORECAST_CONDITION,ATTR_FORECAST_TEMP,Forecast, WeatherEntity,SingleCoordinatorWeatherEntity,WeatherEntityFeature
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, ESTACOES
@@ -30,11 +30,14 @@ async def async_setup_entry(
     )
 
 
-class CgeWeather(CoordinatorEntity[CgeWeatherCoordinator], WeatherEntity):
+class CgeWeather(SingleCoordinatorWeatherEntity[CgeWeatherCoordinator]):
+
+    _attr_supported_features = WeatherEntityFeature.FORECAST_DAILY
+
     def __init__(self, coordinator: CgeWeatherCoordinator, estacao_id: int) -> None:
+        super().__init__(coordinator)
         self.estacao_id = estacao_id
         self.coordinator = coordinator
-        super().__init__(coordinator)
 
 
     @property
@@ -71,14 +74,21 @@ class CgeWeather(CoordinatorEntity[CgeWeatherCoordinator], WeatherEntity):
 
         for item in self.coordinator.data.forecast:
             forecast = Forecast()
-            forecast["datetime"] = item.datetime
-            forecast["humidity"] = item.umidade
-            forecast["templow"] = item.temperaturaMinima
-            forecast["condition"] = item.condicaoTempo
-            forecast["temperature"] = item.temperaturaMaxima
+            forecast[ATTR_FORECAST_TIME] = item.datetime
+            forecast[ATTR_FORECAST_HUMIDITY] = item.umidade
+            forecast[ATTR_FORECAST_TEMP_LOW] = item.temperaturaMinima
+            forecast[ATTR_FORECAST_CONDITION] = item.condicaoTempo
+            forecast[ATTR_FORECAST_TEMP] = item.temperaturaMaxima
             forecasts.append(forecast)
 
         return forecasts
+
+    @callback
+    def _async_forecast_daily(self) -> list[Forecast] | None:
+        """Return the daily forecast in native units."""
+        return self.forecast
+
+
 
     @property
     def device_info(self) -> DeviceInfo:
