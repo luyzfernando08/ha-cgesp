@@ -11,7 +11,7 @@
   "homekit": {},
   "iot_class": "cloud_polling",
   "requirements": [
-    "beautifulsoup4==4.11.1"
+    "beautifulsoup4==4.12.3"
   ],
   "ssdp": [],
   "zeroconf": []
