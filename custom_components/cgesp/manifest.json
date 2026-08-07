@@ -1,18 +1,16 @@
 {
   "domain": "cgesp",
   "name": "CGE - SP",
-  "version": "1.1.0",
   "codeowners": [
     "@luyzfernando08"
   ],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/luyzfernando08/ha-cgesp",
-  "homekit": {},
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/luyzfernando08/ha-cgesp/issues",
   "requirements": [
     "beautifulsoup4==4.12.3"
   ],
-  "ssdp": [],
-  "zeroconf": []
+  "version": "1.1.0"
 }
