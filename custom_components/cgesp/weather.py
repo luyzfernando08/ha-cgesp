@@ -96,7 +96,7 @@ class CgeWeather(SingleCoordinatorWeatherEntity[CgeWeatherCoordinator]):
         return DeviceInfo(
             name="CGE - SP",
             entry_type=DeviceEntryType.SERVICE,
-            identifiers={(DOMAIN, str(self.estacao_id))},
+            identifiers={(DOMAIN,)},  # type: ignore[arg-type]
             manufacturer="cgesp.org",
             model="CGE",
             configuration_url="https://www.cgesp.org/v3/",
