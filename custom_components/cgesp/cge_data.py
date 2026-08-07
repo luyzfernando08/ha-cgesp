@@ -1,5 +1,4 @@
 from __future__ import annotations
-from ast import List
 from .cge_data_forecast import CgeForecastData
 
 

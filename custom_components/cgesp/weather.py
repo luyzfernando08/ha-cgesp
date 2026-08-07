@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.components.weather import ATTR_FORECAST_TIME,ATTR_FORECAST_HUMIDITY,ATTR_FORECAST_TEMP_LOW,ATTR_FORECAST_CONDITION,ATTR_FORECAST_TEMP,Forecast, WeatherEntity,SingleCoordinatorWeatherEntity,WeatherEntityFeature
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ESTACOES
+from .const import CONF_ESTACAO_ID, DOMAIN, ESTACOES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    estacao_id: int = entry.data.get("ESTACAO_ID")
+    estacao_id: int = entry.data[CONF_ESTACAO_ID]
     coordinator: CgeWeatherCoordinator = CgeWeatherCoordinator(
         hass=hass, config_entry=entry
     )
@@ -96,7 +96,7 @@ class CgeWeather(SingleCoordinatorWeatherEntity[CgeWeatherCoordinator]):
         return DeviceInfo(
             name="CGE - SP",
             entry_type=DeviceEntryType.SERVICE,
-            identifiers={(DOMAIN,)},  # type: ignore[arg-type]
+            identifiers={(DOMAIN, str(self.estacao_id))},
             manufacturer="cgesp.org",
             model="CGE",
             configuration_url="https://www.cgesp.org/v3/",

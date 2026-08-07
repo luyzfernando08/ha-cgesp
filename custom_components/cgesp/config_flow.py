@@ -7,12 +7,11 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.selector import selector
 
-from .const import DOMAIN, ESTACOES, ENTRADA_ESTACAO_METEOROLOGICA
+from .cge_scrape import CgeScrape, CgeScrapeError
+from .const import CONF_ESTACAO_ID, DOMAIN, ENTRADA_ESTACAO_METEOROLOGICA, ESTACOES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,12 +30,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         if user_input is not None:
-            await self.async_set_unique_id(f"cge_{user_input.get(ENTRADA_ESTACAO_METEOROLOGICA)}")
+            estacao_id = user_input[ENTRADA_ESTACAO_METEOROLOGICA]
+            await self.async_set_unique_id(f"cge_{estacao_id}")
             self._abort_if_unique_id_configured()
-            return self.async_create_entry(
-                title=ESTACOES[user_input.get(ENTRADA_ESTACAO_METEOROLOGICA)],
-                data={"ESTACAO_ID": user_input.get(ENTRADA_ESTACAO_METEOROLOGICA)},
-            )
+
+            try:
+                await CgeScrape(hass=self.hass, estacao_id=estacao_id).get()
+            except CgeScrapeError:
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001 - fronteira externa (site do CGE)
+                _LOGGER.exception(
+                    "Erro inesperado ao validar a estação meteorológica"
+                )
+                errors["base"] = "unknown"
+            else:
+                return self.async_create_entry(
+                    title=ESTACOES[estacao_id],
+                    data={CONF_ESTACAO_ID: estacao_id},
+                )
 
         return self.async_show_form(
             step_id="user",
@@ -47,7 +58,3 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class CannotConnect(HomeAssistantError):
     """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(HomeAssistantError):
-    """Error to indicate there is invalid auth."""
