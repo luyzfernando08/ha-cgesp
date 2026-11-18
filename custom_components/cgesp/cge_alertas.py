@@ -59,9 +59,24 @@ class PontoAlagamento:
     referencia: str | None
     ativo: bool
     transitavel: bool
+    # Preenchidos pela geocodificação (opcional); o CGE não publica coordenadas.
+    latitude: float | None = None
+    longitude: float | None = None
+    precisao_localizacao: str | None = None
+
+    @property
+    def chave(self) -> str:
+        """Identifica o ponto entre consultas (o CGE não tem id)."""
+        return "|".join(
+            (self.zona, normalizar(self.bairro), normalizar(self.local), self.inicio or "")
+        )
+
+    @property
+    def localizado(self) -> bool:
+        return self.latitude is not None and self.longitude is not None
 
     def como_atributo(self) -> dict:
-        return {
+        atributo = {
             "bairro": self.bairro,
             "local": self.local,
             "inicio": self.inicio,
@@ -69,6 +84,11 @@ class PontoAlagamento:
             "referencia": self.referencia,
             "transitavel": self.transitavel,
         }
+        if self.localizado:
+            atributo["latitude"] = self.latitude
+            atributo["longitude"] = self.longitude
+            atributo["precisao_localizacao"] = self.precisao_localizacao
+        return atributo
 
 
 @dataclass
@@ -112,6 +132,9 @@ class CgeAlertasData:
 
     def pontos_da_zona(self, zona: str) -> list[PontoAlagamento]:
         return (self.alagamentos or {}).get(zona, [])
+
+    def pontos_ativos(self) -> list[PontoAlagamento]:
+        return [p for pontos in (self.alagamentos or {}).values() for p in pontos if p.ativo]
 
     def estado_da_area(self, area: str) -> str | None:
         return (self.estados_areas or {}).get(normalizar(area))

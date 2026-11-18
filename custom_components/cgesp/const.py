@@ -12,6 +12,9 @@ TIPO_ESTACAO = "estacao"
 TIPO_ALERTAS_CIDADE = "alertas_cidade"
 UNIQUE_ID_ALERTAS_CIDADE = "cge_alertas_cidade"
 
+# Opção de "Alertas da cidade": localizar os pontos no OpenStreetMap.
+CONF_GEOCODIFICAR = "geocodificar"
+
 ALERTAS_UPDATE_INTERVAL = timedelta(minutes=10)
 DATA_ALERTAS_COORDINATOR = "alertas_coordinator"
 DATA_ALERTAS_USUARIOS = "alertas_usuarios"

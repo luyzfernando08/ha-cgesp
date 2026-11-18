@@ -1,10 +1,12 @@
 """Coordinator compartilhado dos alertas da cidade (alagamentos e estado das áreas)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .cge_alertas import (
@@ -16,7 +18,9 @@ from .cge_alertas import (
     CgeAlertas,
     CgeAlertasData,
     CgeAlertasError,
+    PontoAlagamento,
 )
+from .cge_geocodificacao import Geocodificador
 from .const import (
     ALERTAS_UPDATE_INTERVAL,
     DATA_ALERTAS_COORDINATOR,
@@ -25,6 +29,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+STORAGE_KEY_GEO = f"{DOMAIN}.geocodificacao"
+STORAGE_VERSION_GEO = 1
 
 URL_ISSUES = "https://github.com/luyzfernando08/ha-cgesp/issues"
 ISSUE_IDS_LAYOUT = {
@@ -40,6 +47,9 @@ URLS_POR_PARTE = {
 class CgeAlertasCoordinator(DataUpdateCoordinator[CgeAlertasData]):
     def __init__(self, hass: HomeAssistant) -> None:
         self.alertas = CgeAlertas(hass=hass)
+        self.geocodificador: Geocodificador | None = None
+        self._store_geo: Store | None = None
+        self._tarefa_geo: asyncio.Task | None = None
         super().__init__(
             hass,
             _LOGGER,
@@ -49,11 +59,64 @@ class CgeAlertasCoordinator(DataUpdateCoordinator[CgeAlertasData]):
 
     async def _async_update_data(self) -> CgeAlertasData:
         try:
-            return await self.alertas.get()
+            dados = await self.alertas.get()
         except CgeAlertasError as err:
             raise UpdateFailed(str(err)) from err
         finally:
             sincronizar_reparos(self.hass, self.alertas.layout_quebrado)
+        self._localizar(dados)
+        return dados
+
+    # ------------------------------------------------ geocodificação (opcional)
+
+    async def async_definir_geocodificacao(self, ativa: bool) -> None:
+        """Liga/desliga a localização dos pontos (opção de "Alertas da cidade")."""
+        if not ativa:
+            self.geocodificador = None
+            if self._tarefa_geo is not None and not self._tarefa_geo.done():
+                self._tarefa_geo.cancel()
+            return
+        if self.geocodificador is not None:
+            return
+
+        self._store_geo = Store(self.hass, STORAGE_VERSION_GEO, STORAGE_KEY_GEO)
+        geocodificador = Geocodificador(self.hass.async_add_executor_job)
+        geocodificador.importar(await self._store_geo.async_load() or {})
+        self.geocodificador = geocodificador
+        if self.data is not None:
+            self._localizar(self.data)
+            self.async_update_listeners()
+
+    def _localizar(self, dados: CgeAlertasData) -> None:
+        """Aplica o cache já; pontos novos são localizados em segundo plano
+        para não atrasar os sensores (o Nominatim aceita 1 consulta/s)."""
+        if self.geocodificador is None:
+            return
+        pendentes = self.geocodificador.aplicar_cache(dados.pontos_ativos())
+        if not pendentes:
+            return
+        if self._tarefa_geo is not None and not self._tarefa_geo.done():
+            return  # a rodada em andamento cuida; o resto fica para a próxima
+        self._tarefa_geo = self.hass.async_create_background_task(
+            self._localizar_pendentes(self.geocodificador, pendentes),
+            name=f"{DOMAIN}_geocodificacao",
+        )
+
+    async def _localizar_pendentes(
+        self, geocodificador: Geocodificador, pendentes: list[PontoAlagamento]
+    ) -> None:
+        try:
+            novidade = await geocodificador.localizar(pendentes)
+        except Exception:  # noqa: BLE001 - localização nunca deve derrubar os alertas
+            _LOGGER.exception("Erro inesperado ao localizar pontos de alagamento")
+            return
+        if not novidade or geocodificador is not self.geocodificador:
+            return
+        if self._store_geo is not None:
+            self._store_geo.async_delay_save(geocodificador.exportar, 30)
+        if self.data is not None:
+            geocodificador.aplicar_cache(self.data.pontos_ativos())
+            self.async_update_listeners()
 
 
 def _issue_id(parte: str) -> str:
@@ -106,6 +169,10 @@ async def async_obter_coordinator(hass: HomeAssistant, entry_id: str) -> CgeAler
         dados[DATA_ALERTAS_COORDINATOR] = coordinator
         await coordinator.async_refresh()
     return coordinator
+
+
+def obter_coordinator_existente(hass: HomeAssistant) -> CgeAlertasCoordinator | None:
+    return hass.data.get(DOMAIN, {}).get(DATA_ALERTAS_COORDINATOR)
 
 
 def liberar_coordinator(hass: HomeAssistant, entry_id: str) -> None:

@@ -7,6 +7,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
@@ -14,6 +15,7 @@ from .cge_alertas import CgeAlertas, CgeAlertasError
 from .cge_scrape import CgeScrape, CgeScrapeError
 from .const import (
     CONF_ESTACAO_ID,
+    CONF_GEOCODIFICAR,
     CONF_TIPO,
     DOMAIN,
     ENTRADA_ESTACAO_METEOROLOGICA,
@@ -92,12 +94,58 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(
                     title="Alertas da cidade",
                     data={CONF_TIPO: TIPO_ALERTAS_CIDADE},
+                    options={
+                        CONF_GEOCODIFICAR: user_input.get(CONF_GEOCODIFICAR, False)
+                    },
                 )
 
         return self.async_show_form(
             step_id=TIPO_ALERTAS_CIDADE,
-            data_schema=vol.Schema({}),
+            data_schema=_schema_opcoes_alertas(False),
             errors=errors,
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        return AlertasCidadeOptionsFlow(config_entry)
+
+    @classmethod
+    @callback
+    def async_supports_options_flow(
+        cls, config_entry: config_entries.ConfigEntry
+    ) -> bool:
+        # Só "Alertas da cidade" tem opções; estações não.
+        return config_entry.data.get(CONF_TIPO) == TIPO_ALERTAS_CIDADE
+
+
+def _schema_opcoes_alertas(geocodificar: bool) -> vol.Schema:
+    return vol.Schema(
+        {vol.Optional(CONF_GEOCODIFICAR, default=geocodificar): bool}
+    )
+
+
+class AlertasCidadeOptionsFlow(config_entries.OptionsFlow):
+    """Liga/desliga a localização dos pontos de alagamento no mapa."""
+
+    def __init__(self, entry: config_entries.ConfigEntry) -> None:
+        # Não usar o nome `config_entry`: em versões novas do HA ele é
+        # fornecido pela classe base e não deve ser atribuído.
+        self._entry = entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_schema_opcoes_alertas(
+                bool(self._entry.options.get(CONF_GEOCODIFICAR, False))
+            ),
         )
 
 

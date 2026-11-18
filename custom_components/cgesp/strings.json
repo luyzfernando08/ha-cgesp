@@ -15,7 +15,13 @@
       },
       "alertas_cidade": {
         "title": "Alertas da cidade",
-        "description": "Cria um sensor de alagamento para cada zona (Norte, Sul, Leste, Oeste e Centro), atualizado a cada 10 minutos."
+        "description": "Cria um sensor de alagamento para cada zona (Norte, Sul, Leste, Oeste e Centro), atualizado a cada 10 minutos.",
+        "data": {
+          "geocodificar": "Mostrar os pontos de alagamento no mapa"
+        },
+        "data_description": {
+          "geocodificar": "O CGE não informa coordenadas. Com esta opção, o nome de cada rua alagada é consultado no OpenStreetMap para descobrir a posição aproximada."
+        }
       }
     },
     "error": {
@@ -24,6 +30,19 @@
     },
     "abort": {
       "already_configured": "Já foi adicionado"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Alertas da cidade",
+        "data": {
+          "geocodificar": "Mostrar os pontos de alagamento no mapa"
+        },
+        "data_description": {
+          "geocodificar": "O CGE não informa coordenadas. Com esta opção, o nome de cada rua alagada é consultado no OpenStreetMap para descobrir a posição aproximada."
+        }
+      }
     }
   },
   "issues": {
