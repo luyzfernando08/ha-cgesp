@@ -2,9 +2,20 @@
   "config": {
     "step": {
       "user": {
+        "title": "O que deseja adicionar?",
+        "menu_options": {
+          "estacao": "Estação meteorológica",
+          "alertas_cidade": "Alertas da cidade (alagamentos por zona)"
+        }
+      },
+      "estacao": {
         "data": {
           "ESTACAO_METEOROLOGICA": "Selecione uma estação meteorológica"
         }
+      },
+      "alertas_cidade": {
+        "title": "Alertas da cidade",
+        "description": "Cria um sensor de alagamento para cada zona (Norte, Sul, Leste, Oeste e Centro), atualizado a cada 10 minutos."
       }
     },
     "error": {
@@ -12,7 +23,25 @@
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
-      "already_configured": "Estação meteorológica já foi adicionada"
+      "already_configured": "Já foi adicionado"
+    }
+  },
+  "issues": {
+    "layout_alterado": {
+      "title": "CGE - SP: o site mudou ({parte})",
+      "description": "Não foi possível ler {parte} no site do CGE ({url}). O layout da página provavelmente mudou e os sensores que dependem dessa informação estão indisponíveis.\n\nErro: `{erro}`\n\nEste aviso some sozinho quando a leitura voltar a funcionar. Se continuar, verifique se há uma versão nova da integração no HACS ou abra uma issue no GitHub."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "estado_alerta": {
+        "state": {
+          "observacao": "Observação",
+          "atencao": "Atenção",
+          "iminencia_transbordamento": "Iminência de transbordamento",
+          "alerta": "Alerta"
+        }
+      }
     }
   }
 }

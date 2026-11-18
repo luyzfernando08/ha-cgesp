@@ -2,13 +2,13 @@ import logging
 from .cge_weather_coordinator import CgeWeatherCoordinator
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.components.weather import ATTR_FORECAST_TIME,ATTR_FORECAST_HUMIDITY,ATTR_FORECAST_TEMP_LOW,ATTR_FORECAST_CONDITION,ATTR_FORECAST_TEMP,Forecast, WeatherEntity,SingleCoordinatorWeatherEntity,WeatherEntityFeature
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_ESTACAO_ID, DOMAIN, ESTACOES
+from .const import CONF_ESTACAO_ID, ESTACOES
+from .entity import cgesp_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,11 +93,4 @@ class CgeWeather(SingleCoordinatorWeatherEntity[CgeWeatherCoordinator]):
     @property
     def device_info(self) -> DeviceInfo:
         """Device info."""
-        return DeviceInfo(
-            name="CGE - SP",
-            entry_type=DeviceEntryType.SERVICE,
-            identifiers={(DOMAIN,)},  # type: ignore[arg-type]
-            manufacturer="cgesp.org",
-            model="CGE",
-            configuration_url="https://www.cgesp.org/v3/",
-        )
+        return cgesp_device_info()
