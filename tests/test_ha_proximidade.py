@@ -189,7 +189,7 @@ async def test_localiza_ponto_novo_no_openstreetmap(hass: HomeAssistant, site_cg
     site_cge.paginas["https://nominatim.openstreetmap.org/search"] = (
         b'[{"lat": "-23.4935", "lon": "-46.4140", "category": "highway",'
         b' "type": "primary", "address": {"road": "Avenida Marechal Tito",'
-        b' "house_number": "7557", "city": "S\u00e3o Paulo"}}]'
+        rb' "house_number": "7557", "city": "S\u00e3o Paulo"}}]'
     )
     await _configurar(hass, **{CONF_GEOCODIFICAR: True})
     await hass.async_block_till_done(wait_background_tasks=True)
