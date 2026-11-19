@@ -10,17 +10,22 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import selector
 
 from .cge_alertas import CgeAlertas, CgeAlertasError
 from .cge_scrape import CgeScrape, CgeScrapeError
 from .const import (
+    CONF_ENTIDADES_PROXIMIDADE,
     CONF_ESTACAO_ID,
     CONF_GEOCODIFICAR,
+    CONF_INTERVALO_ADAPTATIVO,
+    CONF_RAIO_KM,
     CONF_TIPO,
     DOMAIN,
     ENTRADA_ESTACAO_METEOROLOGICA,
     ESTACOES,
     TIPO_ALERTAS_CIDADE,
+    RAIO_KM_PADRAO,
     TIPO_ESTACAO,
     UNIQUE_ID_ALERTAS_CIDADE,
 )
@@ -95,13 +100,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     title="Alertas da cidade",
                     data={CONF_TIPO: TIPO_ALERTAS_CIDADE},
                     options={
-                        CONF_GEOCODIFICAR: user_input.get(CONF_GEOCODIFICAR, False)
+                        CONF_GEOCODIFICAR: user_input.get(CONF_GEOCODIFICAR, False),
+                        CONF_INTERVALO_ADAPTATIVO: user_input.get(
+                            CONF_INTERVALO_ADAPTATIVO, True
+                        ),
                     },
                 )
 
         return self.async_show_form(
             step_id=TIPO_ALERTAS_CIDADE,
-            data_schema=_schema_opcoes_alertas(False),
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_GEOCODIFICAR, default=False): bool,
+                    vol.Optional(CONF_INTERVALO_ADAPTATIVO, default=True): bool,
+                }
+            ),
             errors=errors,
         )
 
@@ -121,14 +134,41 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return config_entry.data.get(CONF_TIPO) == TIPO_ALERTAS_CIDADE
 
 
-def _schema_opcoes_alertas(geocodificar: bool) -> vol.Schema:
+def _schema_opcoes_alertas(opcoes: dict[str, Any]) -> vol.Schema:
     return vol.Schema(
-        {vol.Optional(CONF_GEOCODIFICAR, default=geocodificar): bool}
+        {
+            vol.Optional(
+                CONF_GEOCODIFICAR, default=bool(opcoes.get(CONF_GEOCODIFICAR, False))
+            ): bool,
+            vol.Optional(
+                CONF_ENTIDADES_PROXIMIDADE,
+                default=list(opcoes.get(CONF_ENTIDADES_PROXIMIDADE, [])),
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["person", "device_tracker", "zone"], multiple=True
+                )
+            ),
+            vol.Optional(
+                CONF_RAIO_KM, default=float(opcoes.get(CONF_RAIO_KM, RAIO_KM_PADRAO))
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.5,
+                    max=20,
+                    step=0.5,
+                    unit_of_measurement="km",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_INTERVALO_ADAPTATIVO,
+                default=bool(opcoes.get(CONF_INTERVALO_ADAPTATIVO, True)),
+            ): bool,
+        }
     )
 
 
 class AlertasCidadeOptionsFlow(config_entries.OptionsFlow):
-    """Liga/desliga a localização dos pontos de alagamento no mapa."""
+    """Mapa, alagamentos perto de pessoas/zonas e intervalo de atualização."""
 
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
         # Não usar o nome `config_entry`: em versões novas do HA ele é
@@ -138,14 +178,22 @@ class AlertasCidadeOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            if user_input.get(CONF_ENTIDADES_PROXIMIDADE) and not user_input.get(
+                CONF_GEOCODIFICAR
+            ):
+                # Sem coordenadas dos pontos não há como medir distância.
+                errors[CONF_ENTIDADES_PROXIMIDADE] = "requer_mapa"
+            else:
+                return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(
             step_id="init",
             data_schema=_schema_opcoes_alertas(
-                bool(self._entry.options.get(CONF_GEOCODIFICAR, False))
+                user_input if user_input is not None else dict(self._entry.options)
             ),
+            errors=errors,
         )
 
 

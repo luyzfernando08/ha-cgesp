@@ -1,0 +1,87 @@
+"""Diagnóstico para anexar em issues (Configurações > Integrações > CGE - SP >
+⋮ > Baixar diagnóstico).
+
+Traz o que a integração leu do site na última atualização, para entender
+problemas de layout sem precisar reproduzir. A posição de pessoas e zonas
+não é incluída, só os nomes das entidades acompanhadas.
+"""
+from __future__ import annotations
+
+from dataclasses import asdict
+from typing import Any
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+
+from .cge_alertas_coordinator import obter_coordinator_existente
+from .const import CONF_ESTACAO_ID, ESTACOES, ESTACOES_REGIAO
+
+
+def _resumo_alertas(hass: HomeAssistant) -> dict[str, Any] | None:
+    coordinator = obter_coordinator_existente(hass)
+    if coordinator is None:
+        return None
+    dados = coordinator.data
+    geocodificador = coordinator.geocodificador
+    resumo: dict[str, Any] = {
+        "ultima_atualizacao_ok": coordinator.last_update_success,
+        "ultimo_erro": str(coordinator.last_exception) if coordinator.last_exception else None,
+        "intervalo_atual": str(coordinator.update_interval),
+        "motivo_intervalo": coordinator.motivo_intervalo,
+        "intervalo_adaptativo": coordinator.intervalo_adaptativo,
+        "layout_quebrado": dict(coordinator.alertas.layout_quebrado),
+        "erros_previsao_boletim": dict(coordinator.erros_extras),
+        "localizacao_no_mapa": geocodificador is not None,
+        "cache_localizacao": len(geocodificador.exportar()) if geocodificador else None,
+    }
+    if dados is None:
+        return resumo
+    resumo["dados"] = {
+        "data_referencia": dados.data_referencia,
+        "alagamentos": (
+            {zona: [asdict(p) for p in pontos] for zona, pontos in dados.alagamentos.items()}
+            if dados.alagamentos is not None
+            else None
+        ),
+        "estados_areas": dados.estados_areas,
+        "mapa_atualizado_em": (
+            dados.mapa_atualizado_em.isoformat() if dados.mapa_atualizado_em else None
+        ),
+        "mapa_png_bytes": len(dados.mapa_png) if dados.mapa_png else None,
+        "boletim": (
+            {
+                "titulo": dados.boletim.titulo,
+                "publicado_em": (
+                    dados.boletim.publicado_em.isoformat()
+                    if dados.boletim.publicado_em
+                    else None
+                ),
+                "link": dados.boletim.link,
+            }
+            if dados.boletim
+            else None
+        ),
+        "previsao": (
+            [p.como_atributo() for p in dados.periodos_previsao]
+            if dados.periodos_previsao
+            else None
+        ),
+    }
+    return resumo
+
+
+async def async_get_config_entry_diagnostics(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> dict[str, Any]:
+    diagnostico: dict[str, Any] = {
+        "entrada": {"data": dict(entry.data), "options": dict(entry.options)},
+    }
+    estacao_id = entry.data.get(CONF_ESTACAO_ID)
+    if estacao_id is not None:
+        diagnostico["estacao"] = {
+            "id": estacao_id,
+            "nome": ESTACOES.get(estacao_id),
+            "regiao": ESTACOES_REGIAO.get(estacao_id),
+        }
+    diagnostico["alertas"] = _resumo_alertas(hass)
+    return diagnostico

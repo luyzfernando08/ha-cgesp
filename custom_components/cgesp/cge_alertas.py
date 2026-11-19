@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import requests
 from bs4 import BeautifulSoup
@@ -111,6 +111,7 @@ class ResultadoMapa:
     estados: dict[str, str]
     horario: datetime | None
     avisos: list[str] = field(default_factory=list)
+    png: bytes | None = None
 
 
 @dataclass
@@ -121,6 +122,11 @@ class CgeAlertasData:
     alagamentos: dict[str, list[PontoAlagamento]] | None = None
     estados_areas: dict[str, str] | None = None
     mapa_atualizado_em: datetime | None = None
+    # Imagem do mapa de alertas, servida pela câmera "Mapa de alertas".
+    mapa_png: bytes | None = None
+    # Preenchidos pelo coordinator (cge_extras); None quando indisponíveis.
+    boletim: Any = None
+    periodos_previsao: list[Any] | None = None
 
     @property
     def alagamentos_disponiveis(self) -> bool:
@@ -509,6 +515,7 @@ def _ler_mapa(
     resultado = _parse_estados_areas(resposta_png.content, areas)
     if resultado.horario is None:
         resultado.horario = _horario_do_header(resposta_png.headers.get("Last-Modified"))
+    resultado.png = resposta_png.content
     return resultado
 
 
@@ -597,6 +604,7 @@ class CgeAlertas:
         if isinstance(mapa, ResultadoMapa):
             dados.estados_areas = mapa.estados
             dados.mapa_atualizado_em = mapa.horario
+            dados.mapa_png = mapa.png
             avisos.extend(mapa.avisos)
         self._registrar_avisos(avisos)
         return dados

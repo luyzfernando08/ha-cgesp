@@ -12,8 +12,15 @@ TIPO_ESTACAO = "estacao"
 TIPO_ALERTAS_CIDADE = "alertas_cidade"
 UNIQUE_ID_ALERTAS_CIDADE = "cge_alertas_cidade"
 
-# Opção de "Alertas da cidade": localizar os pontos no OpenStreetMap.
-CONF_GEOCODIFICAR = "geocodificar"
+# Opções de "Alertas da cidade".
+CONF_GEOCODIFICAR = "geocodificar"  # localizar os pontos no OpenStreetMap
+CONF_ENTIDADES_PROXIMIDADE = "entidades_proximidade"  # person/device_tracker/zone
+CONF_RAIO_KM = "raio_km"
+RAIO_KM_PADRAO = 2.0
+CONF_INTERVALO_ADAPTATIVO = "intervalo_adaptativo"  # 30 min quando não há chuva prevista
+
+EVENTO_ALAGAMENTO_NOVO = "cgesp_alagamento_novo"
+EVENTO_ALAGAMENTO_ENCERRADO = "cgesp_alagamento_encerrado"
 
 ALERTAS_UPDATE_INTERVAL = timedelta(minutes=10)
 DATA_ALERTAS_COORDINATOR = "alertas_coordinator"

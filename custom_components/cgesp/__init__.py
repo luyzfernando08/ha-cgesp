@@ -10,7 +10,12 @@ from .cge_alertas_coordinator import (
     liberar_coordinator,
     obter_coordinator_existente,
 )
-from .const import CONF_GEOCODIFICAR, CONF_TIPO, TIPO_ALERTAS_CIDADE
+from .const import (
+    CONF_GEOCODIFICAR,
+    CONF_INTERVALO_ADAPTATIVO,
+    CONF_TIPO,
+    TIPO_ALERTAS_CIDADE,
+)
 
 PLATFORMS_ESTACAO: list[Platform] = [
     Platform.WEATHER,
@@ -19,7 +24,9 @@ PLATFORMS_ESTACAO: list[Platform] = [
 ]
 PLATFORMS_ALERTAS_CIDADE: list[Platform] = [
     Platform.BINARY_SENSOR,
+    Platform.CAMERA,
     Platform.GEO_LOCATION,
+    Platform.SENSOR,
 ]
 
 
@@ -35,7 +42,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Centro de Gerenciamento de Emergências Climáticas da Prefeitura de São Paulo from a config entry."""
 
     if _e_alertas_cidade(entry):
-        coordinator = await async_obter_coordinator(hass, entry.entry_id)
+        coordinator = await async_obter_coordinator(
+            hass, entry.entry_id, alertas_cidade=True
+        )
+        coordinator.intervalo_adaptativo = bool(
+            entry.options.get(CONF_INTERVALO_ADAPTATIVO, True)
+        )
         await coordinator.async_definir_geocodificacao(
             bool(entry.options.get(CONF_GEOCODIFICAR, False))
         )
@@ -62,5 +74,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator = obter_coordinator_existente(hass)
             if coordinator is not None:
                 await coordinator.async_definir_geocodificacao(False)
+                coordinator.intervalo_adaptativo = True
+                coordinator.buscar_boletim = False
         liberar_coordinator(hass, entry.entry_id)
     return descarregou

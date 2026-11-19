@@ -15,12 +15,14 @@
       },
       "alertas_cidade": {
         "title": "Alertas da cidade",
-        "description": "Cria um sensor de alagamento para cada zona (Norte, Sul, Leste, Oeste e Centro), atualizado a cada 10 minutos.",
+        "description": "Cria sensores de alagamento por zona (Norte, Sul, Leste, Oeste e Centro), contadores, o boletim do CGE e as câmeras do radar e do mapa de alertas.",
         "data": {
-          "geocodificar": "Mostrar os pontos de alagamento no mapa"
+          "geocodificar": "Mostrar os pontos de alagamento no mapa",
+          "intervalo_adaptativo": "Atualizar com menos frequência quando não há previsão de chuva"
         },
         "data_description": {
-          "geocodificar": "O CGE não informa coordenadas. Com esta opção, o nome de cada rua alagada é consultado no OpenStreetMap para descobrir a posição aproximada."
+          "geocodificar": "O CGE não informa coordenadas. Com esta opção, o nome de cada rua alagada é consultado no OpenStreetMap para descobrir a posição aproximada.",
+          "intervalo_adaptativo": "A cada 10 minutos quando a previsão do CGE indica chuva nas próximas 12 horas, há alagamento ou região em atenção; a cada 30 minutos no resto do tempo."
         }
       }
     },
@@ -37,12 +39,21 @@
       "init": {
         "title": "Alertas da cidade",
         "data": {
-          "geocodificar": "Mostrar os pontos de alagamento no mapa"
+          "geocodificar": "Mostrar os pontos de alagamento no mapa",
+          "entidades_proximidade": "Avisar sobre alagamentos perto de",
+          "raio_km": "Raio",
+          "intervalo_adaptativo": "Atualizar com menos frequência quando não há previsão de chuva"
         },
         "data_description": {
-          "geocodificar": "O CGE não informa coordenadas. Com esta opção, o nome de cada rua alagada é consultado no OpenStreetMap para descobrir a posição aproximada."
+          "geocodificar": "O CGE não informa coordenadas. Com esta opção, o nome de cada rua alagada é consultado no OpenStreetMap para descobrir a posição aproximada.",
+          "entidades_proximidade": "Pessoas, rastreadores ou zonas. Cada um ganha um sensor com quantos alagamentos estão dentro do raio. Precisa da opção de mostrar os pontos no mapa.",
+          "raio_km": "Distância em linha reta. As posições dos alagamentos são aproximadas, então comece com 2 a 3 km.",
+          "intervalo_adaptativo": "A cada 10 minutos quando a previsão do CGE indica chuva nas próximas 12 horas, há alagamento ou região em atenção; a cada 30 minutos no resto do tempo."
         }
       }
+    },
+    "error": {
+      "requer_mapa": "Ligue \"Mostrar os pontos de alagamento no mapa\": sem as coordenadas não dá para calcular a distância."
     }
   },
   "issues": {

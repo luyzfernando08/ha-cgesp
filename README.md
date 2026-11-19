@@ -7,9 +7,14 @@ Traz para o Home Assistant os dados do [CGE](https://www.cgesp.org/v3/), o Centr
 - **Clima da estação mais perto de você:** temperatura, umidade, pressão, vento e previsão para os próximos dias.
 - **Alagamentos por zona:** um sensor para cada zona (Norte, Sul, Leste, Oeste e Centro) que liga quando há alagamento ativo, com os bairros e as ruas afetadas.
 - **Estado de alerta da sua região:** o mesmo estado que o CGE mostra no mapa da página inicial (Observação, Atenção, Iminência de transbordamento ou Alerta), com o horário da última atualização do mapa.
-- **Alagamentos no mapa (opcional):** cada ponto alagado aparece no cartão de mapa do Home Assistant, e você pode criar automações do tipo "avise se alagar perto do trabalho".
+- **Alagamentos no mapa (opcional):** cada ponto alagado aparece no cartão de mapa do Home Assistant.
+- **Alagamentos perto de quem você quiser:** um sensor por pessoa, rastreador ou zona, com quantos alagamentos estão a menos de X km. Ele acompanha a pessoa enquanto ela se move.
+- **Contadores:** alagamentos ativos na cidade e em cada zona, e quantos houve no dia. Eles entram nas estatísticas do HA, então dá para fazer gráficos.
+- **Boletim do CGE:** o texto mais recente publicado pelo CGE, com a tendência para os próximos dias.
+- **Radar e mapa de alertas:** duas câmeras para colocar no painel, uma com a chuva no radar e outra com o mapa de alertas do CGE.
+- **Eventos:** `cgesp_alagamento_novo` e `cgesp_alagamento_encerrado`, para automações que reagem a cada ponto.
 
-Os alertas são atualizados a cada 10 minutos.
+Os alertas são atualizados a cada 10 minutos quando pode chover e a cada 30 minutos quando não há chuva prevista (veja [Frequência de atualização](#frequência-de-atualização)).
 
 ## Instalação
 
@@ -33,7 +38,10 @@ Ou vá em **Configurações → Dispositivos e serviços → Adicionar integraç
 A integração pergunta o que você quer adicionar:
 
 - **Estação meteorológica:** escolha a estação mais próxima. Você pode adicionar quantas quiser, uma de cada vez.
-- **Alertas da cidade:** cria os sensores de alagamento das cinco zonas. Só precisa adicionar uma vez. Aqui também dá para ligar a opção **Mostrar os pontos de alagamento no mapa**, que pode ser alterada depois em **Configurar**.
+- **Alertas da cidade:** cria os sensores de alagamento das cinco zonas, os contadores, o boletim e as câmeras. Só precisa adicionar uma vez. Depois, em **Configurar**, você escolhe:
+  - **Mostrar os pontos de alagamento no mapa**;
+  - **Avisar sobre alagamentos perto de**: pessoas, rastreadores ou zonas, e o raio em km;
+  - **Atualizar com menos frequência quando não há previsão de chuva** (ligada por padrão).
 
 Tudo fica agrupado num único dispositivo chamado **CGE - SP**.
 
@@ -114,6 +122,49 @@ O sensor liga quando a zona tem pelo menos um ponto de alagamento **ativo** e de
 
 Os dados vêm da página de [alagamentos do CGE](https://www.cgesp.org/v3/alagamentos.jsp), que é preenchida pelos agentes de trânsito da Prefeitura. Ela cobre principalmente o centro expandido e os grandes corredores, então pode não listar alagamentos em ruas menores.
 
+### Contadores
+
+| Entidade | O que mostra |
+|---|---|
+| `sensor.cgesp_alagamentos_ativos` | Pontos ativos na cidade toda. O atributo `por_zona` traz a divisão por zona |
+| `sensor.cgesp_alagamentos_ativos_zona_sul` (e as outras zonas) | Pontos ativos na zona |
+| `sensor.cgesp_alagamentos_hoje` | Todos os pontos registrados no dia, ativos e encerrados. Zera quando o CGE vira o dia |
+
+Como são medições numéricas, o HA guarda o histórico de longo prazo. Um cartão de estatísticas mostra, por exemplo, o pico de alagamentos por dia no último mês.
+
+### Boletim do CGE
+
+`sensor.cgesp_boletim` tem como estado o título do boletim mais recente do CGE, como "Noite segue com chuva leve na cidade". O texto completo fica no atributo `texto`, que costuma trazer a tendência para os próximos dias. Também há `publicado_em` e `link`.
+
+Para ler no painel, use um cartão Markdown:
+
+```yaml
+type: markdown
+content: |
+  ### {{ states('sensor.cgesp_boletim') }}
+  {{ state_attr('sensor.cgesp_boletim', 'texto') }}
+```
+
+### Radar e mapa de alertas
+
+| Entidade | O que mostra |
+|---|---|
+| `camera.cgesp_radar` | Chuva estimada pelo radar sobre a cidade, com a intensidade (fraca, moderada, forte, muito forte) |
+| `camera.cgesp_mapa_alertas` | O mapa "Situação das Áreas Monitoradas" do CGE, com as regiões coloridas pelo estado |
+
+Para mostrar no painel, use um cartão de imagem de entidade (`picture-entity`) com a câmera. A imagem do radar só é baixada quando alguém está vendo, no máximo uma vez a cada 5 minutos. O mapa de alertas é o mesmo que a integração já baixa para ler o estado das regiões, então não gera consulta extra.
+
+### Eventos
+
+A cada atualização, a integração dispara um evento para cada ponto que apareceu ou foi encerrado:
+
+- `cgesp_alagamento_novo`
+- `cgesp_alagamento_encerrado`
+
+Os dados do evento são `zona`, `zona_id`, `bairro`, `local`, `inicio`, `fim`, `sentido`, `referencia` e `transitavel`. Com a opção de mapa ligada, também vêm `latitude` e `longitude`, se a rua já tiver sido localizada. Na primeira vez que uma rua aparece, a localização pode chegar só alguns segundos depois do evento.
+
+Quando o Home Assistant inicia, a integração não dispara eventos para os pontos que já estavam ativos, só para as mudanças a partir dali.
+
 ## Alagamentos no mapa
 
 O CGE informa só o nome da rua e uma referência, sem coordenadas. Com a opção **Mostrar os pontos de alagamento no mapa** ligada, a integração consulta cada rua no [OpenStreetMap](https://www.openstreetmap.org/) para descobrir a posição aproximada.
@@ -142,6 +193,29 @@ entities:
 Cada rua é consultada uma única vez e o resultado fica guardado, então o OpenStreetMap não é consultado a cada 10 minutos. Se o serviço estiver fora do ar ou não achar a rua, o ponto só não aparece no mapa: os sensores de alagamento continuam funcionando normalmente.
 
 Com a opção ligada, os nomes das ruas alagadas são enviados do seu Home Assistant para os servidores do OpenStreetMap. Nenhum dado seu vai junto, mas, se preferir evitar isso, deixe a opção desligada (é o padrão).
+
+## Alagamentos perto de pessoas e lugares
+
+Em **Configurar**, no campo **Avisar sobre alagamentos perto de**, escolha pessoas (`person`), rastreadores (`device_tracker`, como o do carro) ou zonas (`zone`), e o raio em km. Essa opção precisa que **Mostrar os pontos de alagamento no mapa** esteja ligada, porque sem as coordenadas não dá para medir a distância.
+
+Cada um ganha um sensor. Para `person.joao`, ele se chama `sensor.cgesp_alagamentos_perto_joao`. Para rastreadores e zonas, o nome inclui o tipo, como `sensor.cgesp_alagamentos_perto_zone_trabalho`.
+
+O estado é quantos alagamentos ativos estão dentro do raio, e os atributos trazem:
+
+| Atributo | O que tem |
+|---|---|
+| `ruas` | As ruas com a distância, do mais perto ao mais longe: `R STO ARCADIO (0.4 km)` |
+| `mais_proximo_km` | Distância do alagamento mais perto |
+| `pontos` | Detalhes de cada ponto, com a distância |
+| `pontos_sem_localizacao` | Alagamentos ativos que ainda não foram localizados e por isso ficaram fora da conta |
+
+O sensor é recalculado quando a pessoa se move e a cada atualização do CGE. Se a pessoa estiver sem localização, por exemplo quando é rastreada só pelo roteador de casa, o estado fica *desconhecido* e o atributo `motivo` explica por quê.
+
+Algumas observações:
+
+- O raio é contado em linha reta, não pelo caminho de carro.
+- A posição do alagamento é aproximada (veja a precisão em [Alagamentos no mapa](#alagamentos-no-mapa)). Em avenidas longas, um raio pequeno pode deixar alagamentos de fora. Comece com 2 ou 3 km.
+- O raio vale para todas as entidades escolhidas.
 
 ## Exemplos de automação
 
@@ -211,50 +285,14 @@ automation:
 
 ### Alagamento a menos de X km de uma pessoa
 
-O exemplo anterior serve para lugares fixos. Para saber se há alagamento perto de **alguém**, onde quer que a pessoa esteja, é preciso que ela tenha localização no Home Assistant (por exemplo, pelo app do celular) e da opção de mapa ligada.
-
-Primeiro, crie um sensor que conta os alagamentos perto da pessoa. Ele é recalculado sozinho quando a pessoa se move ou quando um alagamento aparece ou some. Coloque no `configuration.yaml` e troque `person.joao` e o raio:
-
-```yaml
-template:
-  - sensor:
-      - name: Alagamentos perto do João
-        unique_id: alagamentos_perto_joao
-        icon: mdi:home-flood
-        unit_of_measurement: pontos
-        state: >
-          {% set pessoa = 'person.joao' %}
-          {% set raio_km = 2 %}
-          {% set ns = namespace(total=0) %}
-          {% for ponto in states.geo_location | selectattr('attributes.source', 'eq', 'cgesp') %}
-            {% set km = distance(pessoa, ponto.entity_id) %}
-            {% if km is not none and km <= raio_km %}
-              {% set ns.total = ns.total + 1 %}
-            {% endif %}
-          {% endfor %}
-          {{ ns.total }}
-        attributes:
-          ruas: >
-            {% set pessoa = 'person.joao' %}
-            {% set raio_km = 2 %}
-            {% set ns = namespace(ruas=[]) %}
-            {% for ponto in states.geo_location | selectattr('attributes.source', 'eq', 'cgesp') %}
-              {% set km = distance(pessoa, ponto.entity_id) %}
-              {% if km is not none and km <= raio_km %}
-                {% set ns.ruas = ns.ruas + [ponto.attributes.rua ~ ' (' ~ (km | round(1)) ~ ' km)'] %}
-              {% endif %}
-            {% endfor %}
-            {{ ns.ruas }}
-```
-
-Depois, a automação. Ela avisa sempre que o número de alagamentos perto da pessoa **aumenta**, ou seja, quando ela chega perto de um ponto alagado ou quando surge um novo perto dela:
+Primeiro, escolha a pessoa em **Configurar → Avisar sobre alagamentos perto de** (veja [Alagamentos perto de pessoas e lugares](#alagamentos-perto-de-pessoas-e-lugares)). A automação avisa sempre que o número de alagamentos perto dela **aumenta**, ou seja, quando ela chega perto de um ponto alagado ou quando surge um novo perto dela:
 
 ```yaml
 automation:
   - alias: Alagamento perto do João
     trigger:
       - platform: state
-        entity_id: sensor.alagamentos_perto_do_joao
+        entity_id: sensor.cgesp_alagamentos_perto_joao
     condition:
       - condition: template
         value_template: >
@@ -263,16 +301,45 @@ automation:
     action:
       - service: notify.mobile_app_celular_do_joao
         data:
-          title: Alagamento a menos de 2 km
+          title: Alagamento perto de você
           message: >
-            {{ state_attr('sensor.alagamentos_perto_do_joao', 'ruas') | join(', ') }}
+            {{ state_attr('sensor.cgesp_alagamentos_perto_joao', 'ruas') | join(', ') }}
 ```
 
-Algumas observações:
+Para acompanhar mais de uma pessoa, adicione todas na mesma opção e repita a automação trocando o sensor e o celular.
 
-- O raio é contado em linha reta, não pelo caminho de carro.
-- A posição do alagamento é aproximada (veja a precisão em [Alagamentos no mapa](#alagamentos-no-mapa)). Em avenidas longas, um raio pequeno pode deixar alagamentos de fora. Comece com 2 ou 3 km.
-- Para acompanhar mais de uma pessoa, repita o sensor e a automação para cada uma.
+### Cada alagamento novo, com o local
+
+Usa o evento `cgesp_alagamento_novo` e avisa só quando o ponto está intransitável:
+
+```yaml
+automation:
+  - alias: Alagamento intransitável
+    trigger:
+      - platform: event
+        event_type: cgesp_alagamento_novo
+    condition:
+      - condition: template
+        value_template: "{{ not trigger.event.data.transitavel }}"
+    action:
+      - service: notify.notify
+        data:
+          title: "Alagamento intransitável - {{ trigger.event.data.zona }}"
+          message: >
+            {{ trigger.event.data.local }} ({{ trigger.event.data.bairro }}),
+            desde {{ trigger.event.data.inicio }}
+```
+
+## Frequência de atualização
+
+Com a opção **Atualizar com menos frequência quando não há previsão de chuva** ligada (é o padrão), os alertas são consultados:
+
+- **a cada 10 minutos** quando a previsão do CGE indica chuva ou potencial para temporais nas próximas 12 horas, quando há alagamento ativo ou região fora de Observação, ou quando não foi possível ler a previsão;
+- **a cada 30 minutos** no resto do tempo.
+
+A previsão é a mesma da página de [previsão estendida](https://www.cgesp.org/v3/previsao_estendida.jsp) do CGE, que separa madrugada, manhã, tarde e noite, e é lida no máximo uma vez por hora. Na dúvida, a integração fica no intervalo curto. Se preferir 10 minutos sempre, desligue a opção.
+
+As entidades de clima das estações seguem como antes, atualizadas mais ou menos a cada hora.
 
 ## Se o site do CGE sair do ar ou mudar
 
@@ -282,10 +349,12 @@ A integração depende do site do CGE, que não tem uma API oficial. Por isso el
 - **Só uma parte falhou:** a página de alagamentos e o mapa são lidos separadamente. Se um deles falhar, os sensores do outro continuam funcionando.
 - **O CGE mudou a página:** se a integração não conseguir mais ler os alagamentos, os sensores de zona ficam *indisponíveis*. Eles não passam a dizer "sem alagamento". Também aparece um aviso em **Configurações → Reparos** explicando o que aconteceu. Esse aviso some sozinho quando a leitura volta a funcionar.
 
-Se o aviso de Reparos não sumir, veja se há uma versão nova no HACS ou [abra uma issue](https://github.com/luyzfernando08/ha-cgesp/issues).
+Se o aviso de Reparos não sumir, veja se há uma versão nova no HACS ou [abra uma issue](https://github.com/luyzfernando08/ha-cgesp/issues). Ajuda muito anexar o diagnóstico: em **Configurações → Dispositivos e serviços → CGE - SP**, abra o menu (⋮) da entrada **Alertas da cidade** e clique em **Baixar diagnóstico**. O arquivo traz o que a integração leu do site na última atualização. A localização de pessoas e zonas não vai junto.
 
 ## Créditos
 
 Todos os dados são do [CGE - Centro de Gerenciamento de Emergências Climáticas](https://www.cgesp.org/v3/) da Prefeitura de São Paulo. Esta integração não tem vínculo oficial com o CGE nem com a Prefeitura.
+
+A imagem do radar é do [SAISP](https://www.saisp.br/), operado pela [FCTH](https://www.fcth.br/), e é publicada pelo CGE.
 
 A localização dos pontos no mapa usa o [Nominatim](https://nominatim.org/), com dados © [colaboradores do OpenStreetMap](https://www.openstreetmap.org/copyright).

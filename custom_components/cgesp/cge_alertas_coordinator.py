@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
+from typing import Any
+
+import requests
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .cge_alertas import (
     PARTE_ALAGAMENTOS,
@@ -19,6 +24,19 @@ from .cge_alertas import (
     CgeAlertasData,
     CgeAlertasError,
     PontoAlagamento,
+    _buscar,
+    _decodificar_texto,
+)
+from .cge_extras import (
+    INTERVALO_COM_CHUVA,
+    URL_BOLETIM,
+    URL_PREVISAO,
+    Boletim,
+    PeriodoPrevisao,
+    diferenca_pontos,
+    escolher_intervalo,
+    parse_boletim,
+    parse_periodos,
 )
 from .cge_geocodificacao import Geocodificador
 from .const import (
@@ -26,6 +44,9 @@ from .const import (
     DATA_ALERTAS_COORDINATOR,
     DATA_ALERTAS_USUARIOS,
     DOMAIN,
+    EVENTO_ALAGAMENTO_ENCERRADO,
+    EVENTO_ALAGAMENTO_NOVO,
+    ZONAS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,6 +64,26 @@ URLS_POR_PARTE = {
     PARTE_MAPA: URL_MAPA_AREAS,
 }
 
+FUSO_SAO_PAULO = "America/Sao_Paulo"
+VALIDADE_PREVISAO = timedelta(hours=1)
+
+
+def _ler_previsao() -> list[PeriodoPrevisao]:
+    return parse_periodos(_decodificar_texto(_buscar(URL_PREVISAO).content))
+
+
+def _ler_boletim() -> Boletim:
+    return parse_boletim(_buscar(URL_BOLETIM).content)
+
+
+def dados_evento(ponto: PontoAlagamento) -> dict[str, Any]:
+    return {
+        "zona": ZONAS.get(ponto.zona, ponto.zona),
+        "zona_id": ponto.zona,
+        **ponto.como_atributo(),
+        "fim": ponto.fim,
+    }
+
 
 class CgeAlertasCoordinator(DataUpdateCoordinator[CgeAlertasData]):
     def __init__(self, hass: HomeAssistant) -> None:
@@ -50,6 +91,17 @@ class CgeAlertasCoordinator(DataUpdateCoordinator[CgeAlertasData]):
         self.geocodificador: Geocodificador | None = None
         self._store_geo: Store | None = None
         self._tarefa_geo: asyncio.Task | None = None
+        # Intervalo adaptativo (opção de "Alertas da cidade"; ligado por padrão).
+        self.intervalo_adaptativo = True
+        # O boletim só tem sensor em "Alertas da cidade"; sem ela, não é baixado.
+        self.buscar_boletim = False
+        self.motivo_intervalo: str | None = None
+        self._periodos: list[PeriodoPrevisao] | None = None
+        self._previsao_lida_em: datetime | None = None
+        self._boletim: Boletim | None = None
+        self.erros_extras: dict[str, str] = {}
+        # Pontos ativos da leitura anterior (None até a primeira leitura).
+        self._pontos_anteriores: dict[str, PontoAlagamento] | None = None
         super().__init__(
             hass,
             _LOGGER,
@@ -59,13 +111,101 @@ class CgeAlertasCoordinator(DataUpdateCoordinator[CgeAlertasData]):
 
     async def _async_update_data(self) -> CgeAlertasData:
         try:
-            dados = await self.alertas.get()
+            dados, _ = await asyncio.gather(self.alertas.get(), self._atualizar_extras())
         except CgeAlertasError as err:
+            self._definir_intervalo(None)
             raise UpdateFailed(str(err)) from err
         finally:
             sincronizar_reparos(self.hass, self.alertas.layout_quebrado)
+        dados.boletim = self._boletim
+        dados.periodos_previsao = self._periodos
         self._localizar(dados)
+        self._disparar_eventos(dados)
+        self._definir_intervalo(dados)
         return dados
+
+    # ------------------------------------------------ previsão e boletim
+
+    def _agora_local(self) -> datetime:
+        fuso = dt_util.get_time_zone(FUSO_SAO_PAULO)
+        return dt_util.now(fuso).replace(tzinfo=None)
+
+    async def _tentar_extra(self, nome: str, funcao):
+        try:
+            valor = await self.hass.async_add_executor_job(funcao)
+        except (
+            requests.exceptions.RequestException,
+            CgeAlertasError,
+            AttributeError,
+            IndexError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as err:
+            if nome not in self.erros_extras:
+                _LOGGER.info("CGE: não foi possível ler %s: %s", nome, err)
+            self.erros_extras[nome] = str(err)
+            return None
+        if nome in self.erros_extras:
+            self.erros_extras.pop(nome)
+            _LOGGER.info("CGE: %s voltou a funcionar", nome)
+        return valor
+
+    async def _atualizar_extras(self) -> None:
+        """Previsão (no máximo 1x por hora) e último boletim. Falhas aqui
+        nunca derrubam os alertas: a previsão só ajusta o intervalo."""
+        agora = self._agora_local()
+        previsao_vencida = (
+            self._previsao_lida_em is None
+            or agora - self._previsao_lida_em >= VALIDADE_PREVISAO
+        )
+
+        async def _nada() -> None:
+            return None
+
+        boletim, periodos = await asyncio.gather(
+            self._tentar_extra("boletim", _ler_boletim) if self.buscar_boletim else _nada(),
+            self._tentar_extra("previsão", _ler_previsao) if previsao_vencida else _nada(),
+        )
+        if boletim is not None:
+            self._boletim = boletim
+        if periodos is not None:
+            self._periodos = periodos
+            self._previsao_lida_em = agora
+
+    def _definir_intervalo(self, dados: CgeAlertasData | None) -> None:
+        if not self.intervalo_adaptativo:
+            intervalo, motivo = ALERTAS_UPDATE_INTERVAL, "intervalo fixo (opção desligada)"
+        elif dados is None:
+            intervalo, motivo = INTERVALO_COM_CHUVA, "falha ao ler o CGE"
+        else:
+            intervalo, motivo = escolher_intervalo(dados, self._periodos, self._agora_local())
+        if intervalo != self.update_interval:
+            _LOGGER.debug("CGE: atualizando a cada %s (%s)", intervalo, motivo)
+        self.update_interval = intervalo
+        self.motivo_intervalo = motivo
+
+    # ------------------------------------------------ eventos
+
+    def _disparar_eventos(self, dados: CgeAlertasData) -> None:
+        """cgesp_alagamento_novo / cgesp_alagamento_encerrado.
+
+        A primeira leitura só serve de base (não dispara um evento para cada
+        ponto já ativo quando o HA inicia). Com os alagamentos indisponíveis,
+        nada muda: site fora do ar não encerra alagamento.
+        """
+        if not dados.alagamentos_disponiveis:
+            return
+        atuais = {p.chave: p for p in dados.pontos_ativos()}
+        anteriores = self._pontos_anteriores
+        self._pontos_anteriores = atuais
+        if anteriores is None:
+            return
+        novos, encerrados = diferenca_pontos(anteriores, atuais)
+        for ponto in novos:
+            self.hass.bus.async_fire(EVENTO_ALAGAMENTO_NOVO, dados_evento(ponto))
+        for ponto in encerrados:
+            self.hass.bus.async_fire(EVENTO_ALAGAMENTO_ENCERRADO, dados_evento(ponto))
 
     # ------------------------------------------------ geocodificação (opcional)
 
@@ -153,7 +293,9 @@ def remover_reparos(hass: HomeAssistant) -> None:
         ir.async_delete_issue(hass, DOMAIN, _issue_id(parte))
 
 
-async def async_obter_coordinator(hass: HomeAssistant, entry_id: str) -> CgeAlertasCoordinator:
+async def async_obter_coordinator(
+    hass: HomeAssistant, entry_id: str, alertas_cidade: bool = False
+) -> CgeAlertasCoordinator:
     """Retorna o coordinator único da integração, criando-o no primeiro uso.
 
     Todas as entradas (estações e "Alertas da cidade") compartilham a mesma
@@ -166,7 +308,12 @@ async def async_obter_coordinator(hass: HomeAssistant, entry_id: str) -> CgeAler
     coordinator: CgeAlertasCoordinator | None = dados.get(DATA_ALERTAS_COORDINATOR)
     if coordinator is None:
         coordinator = CgeAlertasCoordinator(hass)
+        coordinator.buscar_boletim = alertas_cidade
         dados[DATA_ALERTAS_COORDINATOR] = coordinator
+        await coordinator.async_refresh()
+    elif alertas_cidade and not coordinator.buscar_boletim:
+        # Já existia por causa das estações: lê o boletim agora, sem esperar o ciclo.
+        coordinator.buscar_boletim = True
         await coordinator.async_refresh()
     return coordinator
 

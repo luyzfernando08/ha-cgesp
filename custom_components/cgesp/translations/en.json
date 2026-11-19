@@ -1,66 +1,77 @@
 {
-    "config": {
-        "abort": {
-            "already_configured": "Device is already configured"
+  "config": {
+    "step": {
+      "user": {
+        "title": "What would you like to add?",
+        "menu_options": {
+          "estacao": "Weather station",
+          "alertas_cidade": "City alerts (flooding by zone)"
+        }
+      },
+      "estacao": {
+        "data": {
+          "ESTACAO_METEOROLOGICA": "Select a weather station"
+        }
+      },
+      "alertas_cidade": {
+        "title": "City alerts",
+        "description": "Creates flooding sensors per zone (North, South, East, West and Center), counters, the CGE bulletin and cameras for the rain radar and the alert map.",
+        "data": {
+          "geocodificar": "Show flooding spots on the map",
+          "intervalo_adaptativo": "Update less often when no rain is forecast"
         },
-        "error": {
-            "cannot_connect": "Failed to connect",
-            "unknown": "Unexpected error"
-        },
-        "step": {
-            "user": {
-                "title": "O que deseja adicionar?",
-                "menu_options": {
-                    "estacao": "Estação meteorológica",
-                    "alertas_cidade": "Alertas da cidade (alagamentos por zona)"
-                }
-            },
-            "estacao": {
-                "data": {
-                    "ESTACAO_METEOROLOGICA": "Selecione uma estação meteorológica"
-                }
-            },
-            "alertas_cidade": {
-                "title": "Alertas da cidade",
-                "description": "Cria um sensor de alagamento para cada zona (Norte, Sul, Leste, Oeste e Centro), atualizado a cada 10 minutos.",
-                "data": {
-                    "geocodificar": "Mostrar os pontos de alagamento no mapa"
-                },
-                "data_description": {
-                    "geocodificar": "O CGE não informa coordenadas. Com esta opção, o nome de cada rua alagada é consultado no OpenStreetMap para descobrir a posição aproximada."
-                }
-            }
+        "data_description": {
+          "geocodificar": "CGE doesn't publish coordinates. With this option, each flooded street is looked up on OpenStreetMap to find its approximate position.",
+          "intervalo_adaptativo": "Every 10 minutes when the CGE forecast shows rain in the next 12 hours, or there is flooding or a region on alert; every 30 minutes otherwise."
         }
+      }
     },
-    "options": {
-        "step": {
-            "init": {
-                "title": "Alertas da cidade",
-                "data": {
-                    "geocodificar": "Mostrar os pontos de alagamento no mapa"
-                },
-                "data_description": {
-                    "geocodificar": "O CGE não informa coordenadas. Com esta opção, o nome de cada rua alagada é consultado no OpenStreetMap para descobrir a posição aproximada."
-                }
-            }
-        }
+    "error": {
+      "cannot_connect": "Failed to connect to the CGE website",
+      "unknown": "Unexpected error"
     },
-    "issues": {
-        "layout_alterado": {
-            "title": "CGE - SP: o site mudou ({parte})",
-            "description": "Não foi possível ler {parte} no site do CGE ({url}). O layout da página provavelmente mudou e os sensores que dependem dessa informação estão indisponíveis.\n\nErro: `{erro}`\n\nEste aviso some sozinho quando a leitura voltar a funcionar. Se continuar, verifique se há uma versão nova da integração no HACS ou abra uma issue no GitHub."
-        }
-    },
-    "entity": {
-        "sensor": {
-            "estado_alerta": {
-                "state": {
-                    "observacao": "Observação",
-                    "atencao": "Atenção",
-                    "iminencia_transbordamento": "Iminência de transbordamento",
-                    "alerta": "Alerta"
-                }
-            }
-        }
+    "abort": {
+      "already_configured": "Already configured"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "City alerts",
+        "data": {
+          "geocodificar": "Show flooding spots on the map",
+          "entidades_proximidade": "Warn about flooding near",
+          "raio_km": "Radius",
+          "intervalo_adaptativo": "Update less often when no rain is forecast"
+        },
+        "data_description": {
+          "geocodificar": "CGE doesn't publish coordinates. With this option, each flooded street is looked up on OpenStreetMap to find its approximate position.",
+          "entidades_proximidade": "People, trackers or zones. Each one gets a sensor with how many flooding spots are within the radius. Requires showing flooding spots on the map.",
+          "raio_km": "Straight-line distance. Flooding positions are approximate, so start with 2 to 3 km.",
+          "intervalo_adaptativo": "Every 10 minutes when the CGE forecast shows rain in the next 12 hours, or there is flooding or a region on alert; every 30 minutes otherwise."
+        }
+      }
+    },
+    "error": {
+      "requer_mapa": "Turn on \"Show flooding spots on the map\": distance can't be calculated without coordinates."
+    }
+  },
+  "issues": {
+    "layout_alterado": {
+      "title": "CGE - SP: the website changed ({parte})",
+      "description": "Couldn't read {parte} on the CGE website ({url}). The page layout has probably changed, and the sensors that depend on it are unavailable.\n\nError: `{erro}`\n\nThis warning goes away on its own once reading works again. If it persists, check HACS for a new version of the integration or open an issue on GitHub."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "estado_alerta": {
+        "state": {
+          "observacao": "Observation",
+          "atencao": "Attention",
+          "iminencia_transbordamento": "Imminent overflow",
+          "alerta": "Alert"
+        }
+      }
+    }
+  }
 }
