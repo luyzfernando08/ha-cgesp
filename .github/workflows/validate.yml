@@ -34,3 +34,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements_test.txt
       - run: pytest -v
+
+  # Os mesmos testes e mais os tests/test_ha_*.py, que sobem um Home Assistant
+  # de verdade (configuração, entidades, eventos, Reparos, diagnóstico).
+  # Usa o HA mais recente; o Python acompanha o que ele exige.
+  pytest-ha:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements_test_ha.txt
+      - run: pytest -v

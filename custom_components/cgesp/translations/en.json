@@ -59,7 +59,7 @@
   "issues": {
     "layout_alterado": {
       "title": "CGE - SP: the website changed ({parte})",
-      "description": "Couldn't read {parte} on the CGE website ({url}). The page layout has probably changed, and the sensors that depend on it are unavailable.\n\nError: `{erro}`\n\nThis warning goes away on its own once reading works again. If it persists, check HACS for a new version of the integration or open an issue on GitHub."
+      "description": "Couldn't read {parte} on the CGE website ({url}). The page layout has probably changed, and the sensors that depend on it are unavailable.\n\nError: `{erro}`\n\nThis warning goes away on its own once reading works again. If it persists, check the Marketplace (or HACS) for a new version of the integration or open an issue on GitHub."
     }
   },
   "entity": {

@@ -1,6 +1,9 @@
 {
   "domain": "cgesp",
   "name": "CGE - SP",
+  "categories": [
+    "weather_alerts"
+  ],
   "codeowners": [
     "@luyzfernando08"
   ],

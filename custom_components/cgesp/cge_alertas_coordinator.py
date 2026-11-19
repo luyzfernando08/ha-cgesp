@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 import requests
 
+from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
@@ -76,6 +79,18 @@ def _ler_boletim() -> Boletim:
     return parse_boletim(_buscar(URL_BOLETIM).content)
 
 
+def kwargs_config_entry(entry: ConfigEntry | None) -> dict[str, Any]:
+    """`config_entry=` para o DataUpdateCoordinator, quando o HA aceita.
+
+    O HA associa o coordinator a uma entrada e o desliga quando ela é
+    descarregada. As versões novas pedem a entrada explicitamente; as antigas
+    não têm o parâmetro e usam a entrada que estava sendo configurada.
+    """
+    if "config_entry" in inspect.signature(DataUpdateCoordinator.__init__).parameters:
+        return {"config_entry": entry}
+    return {}
+
+
 def dados_evento(ponto: PontoAlagamento) -> dict[str, Any]:
     return {
         "zona": ZONAS.get(ponto.zona, ponto.zona),
@@ -107,6 +122,9 @@ class CgeAlertasCoordinator(DataUpdateCoordinator[CgeAlertasData]):
             _LOGGER,
             name=f"{DOMAIN}_alertas",
             update_interval=ALERTAS_UPDATE_INTERVAL,
+            # Compartilhado por todas as entradas: não pertence a nenhuma
+            # (ver async_obter_coordinator).
+            **kwargs_config_entry(None),
         )
 
     async def _async_update_data(self) -> CgeAlertasData:
@@ -172,6 +190,12 @@ class CgeAlertasCoordinator(DataUpdateCoordinator[CgeAlertasData]):
         if periodos is not None:
             self._periodos = periodos
             self._previsao_lida_em = agora
+
+    def definir_intervalo_adaptativo(self, ativo: bool) -> None:
+        """Aplica a opção já, sem esperar a próxima leitura (que, com o
+        intervalo antigo, poderia demorar até 30 minutos)."""
+        self.intervalo_adaptativo = ativo
+        self._definir_intervalo(self.data if self.last_update_success else None)
 
     def _definir_intervalo(self, dados: CgeAlertasData | None) -> None:
         if not self.intervalo_adaptativo:
@@ -307,7 +331,14 @@ async def async_obter_coordinator(
 
     coordinator: CgeAlertasCoordinator | None = dados.get(DATA_ALERTAS_COORDINATOR)
     if coordinator is None:
-        coordinator = CgeAlertasCoordinator(hass)
+        # Sem isso, o HA associaria o coordinator à entrada que está sendo
+        # configurada agora e o desligaria quando ela fosse removida ou
+        # recarregada (ex.: ao mudar as opções), parando as outras entradas.
+        contexto = config_entries.current_entry.set(None)
+        try:
+            coordinator = CgeAlertasCoordinator(hass)
+        finally:
+            config_entries.current_entry.reset(contexto)
         coordinator.buscar_boletim = alertas_cidade
         dados[DATA_ALERTAS_COORDINATOR] = coordinator
         await coordinator.async_refresh()

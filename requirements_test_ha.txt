@@ -1,0 +1,7 @@
+# Testes dentro de um Home Assistant de verdade (tests/test_ha_*.py).
+# Precisa de Linux (o HA não roda no Windows) e da versão do Python exigida
+# pelo HA instalado. A versão do plugin define a versão do HA.
+-r requirements_test.txt
+pytest-homeassistant-custom-component
+# Requisito da plataforma camera do HA (o HA instalado normalmente já tem).
+PyTurboJPEG

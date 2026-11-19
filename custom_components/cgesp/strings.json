@@ -59,7 +59,7 @@
   "issues": {
     "layout_alterado": {
       "title": "CGE - SP: o site mudou ({parte})",
-      "description": "Não foi possível ler {parte} no site do CGE ({url}). O layout da página provavelmente mudou e os sensores que dependem dessa informação estão indisponíveis.\n\nErro: `{erro}`\n\nEste aviso some sozinho quando a leitura voltar a funcionar. Se continuar, verifique se há uma versão nova da integração no HACS ou abra uma issue no GitHub."
+      "description": "Não foi possível ler {parte} no site do CGE ({url}). O layout da página provavelmente mudou e os sensores que dependem dessa informação estão indisponíveis.\n\nErro: `{erro}`\n\nEste aviso some sozinho quando a leitura voltar a funcionar. Se continuar, verifique se há uma versão nova da integração no Marketplace (ou no HACS) ou abra uma issue no GitHub."
     }
   },
   "entity": {

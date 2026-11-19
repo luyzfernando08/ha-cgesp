@@ -18,14 +18,28 @@ Os alertas são atualizados a cada 10 minutos quando pode chover e a cada 30 min
 
 ## Instalação
 
-Você precisa ter o [HACS](https://hacs.xyz/) instalado.
+A partir do Home Assistant 2026.11, o HACS virou o **Marketplace**, que já vem com o HA. Clique no botão para abrir a integração direto no seu Marketplace:
 
-1. No HACS, abra o menu (⋮) e vá em **Repositórios personalizados**.
-2. Cole o endereço abaixo, escolha a categoria **Integração** e clique em **Adicionar**:
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=luyzfernando08&repository=ha-cgesp&category=integration" rel="CGE - SP">![Abrir no Marketplace](https://my.home-assistant.io/badges/hacs_repository.svg)</a>
+
+Ou faça pelo menu:
+
+1. Vá em **Configurações → Marketplace**.
+2. No canto superior direito, clique no botão para adicionar por link (*Add from link*).
+3. Cole o endereço abaixo e clique em **Adicionar**:
    ```
    https://github.com/luyzfernando08/ha-cgesp
    ```
+4. Siga a configuração que abre em seguida. No Marketplace, a integração já vai direto para a configuração, sem precisar reiniciar.
+
+<details>
+<summary>Home Assistant 2026.10 ou anterior (com HACS)</summary>
+
+1. No [HACS](https://hacs.xyz/), abra o menu (⋮) e vá em **Repositórios personalizados**.
+2. Cole o endereço `https://github.com/luyzfernando08/ha-cgesp`, escolha a categoria **Integração** e clique em **Adicionar**.
 3. Procure por **CGE - SP**, clique em **Baixar** e reinicie o Home Assistant.
+
+</details>
 
 ## Configuração
 
@@ -164,6 +178,8 @@ A cada atualização, a integração dispara um evento para cada ponto que apare
 Os dados do evento são `zona`, `zona_id`, `bairro`, `local`, `inicio`, `fim`, `sentido`, `referencia` e `transitavel`. Com a opção de mapa ligada, também vêm `latitude` e `longitude`, se a rua já tiver sido localizada. Na primeira vez que uma rua aparece, a localização pode chegar só alguns segundos depois do evento.
 
 Quando o Home Assistant inicia, a integração não dispara eventos para os pontos que já estavam ativos, só para as mudanças a partir dali.
+
+Os eventos também aparecem no **Diário de bordo**, como frases (por exemplo, "novo alagamento: Avenida Marechal Tito, altura do número 7557 (Itaim Paulista, Zona Leste), intransitável"). Eles ficam ligados ao sensor de alagamento da zona, então dá para ver o histórico do dia abrindo esse sensor, sem criar automação.
 
 ## Alagamentos no mapa
 
@@ -349,7 +365,7 @@ A integração depende do site do CGE, que não tem uma API oficial. Por isso el
 - **Só uma parte falhou:** a página de alagamentos e o mapa são lidos separadamente. Se um deles falhar, os sensores do outro continuam funcionando.
 - **O CGE mudou a página:** se a integração não conseguir mais ler os alagamentos, os sensores de zona ficam *indisponíveis*. Eles não passam a dizer "sem alagamento". Também aparece um aviso em **Configurações → Reparos** explicando o que aconteceu. Esse aviso some sozinho quando a leitura volta a funcionar.
 
-Se o aviso de Reparos não sumir, veja se há uma versão nova no HACS ou [abra uma issue](https://github.com/luyzfernando08/ha-cgesp/issues). Ajuda muito anexar o diagnóstico: em **Configurações → Dispositivos e serviços → CGE - SP**, abra o menu (⋮) da entrada **Alertas da cidade** e clique em **Baixar diagnóstico**. O arquivo traz o que a integração leu do site na última atualização. A localização de pessoas e zonas não vai junto.
+Se o aviso de Reparos não sumir, veja se há uma versão nova no Marketplace (ou no HACS, em versões antigas do HA) ou [abra uma issue](https://github.com/luyzfernando08/ha-cgesp/issues). Ajuda muito anexar o diagnóstico: em **Configurações → Dispositivos e serviços → CGE - SP**, abra o menu (⋮) da entrada **Alertas da cidade** e clique em **Baixar diagnóstico**. O arquivo traz o que a integração leu do site na última atualização. A localização de pessoas e zonas não vai junto.
 
 ## Créditos
 

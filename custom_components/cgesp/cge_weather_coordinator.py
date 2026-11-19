@@ -6,6 +6,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import logging
 
+from .cge_alertas_coordinator import kwargs_config_entry
 from .cge_scrape import CgeScrape, CgeScrapeError
 from .const import CONF_ESTACAO_ID, DOMAIN
 
@@ -18,7 +19,13 @@ class CgeWeatherCoordinator(DataUpdateCoordinator["CgeData"]):
             hass=hass, estacao_id=config_entry.data[CONF_ESTACAO_ID]
         )
         update_interval = timedelta(minutes=randrange(61, 75))
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=update_interval)
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=update_interval,
+            **kwargs_config_entry(config_entry),
+        )
 
     async def _async_update_data(self) -> CgeData:
         try:
