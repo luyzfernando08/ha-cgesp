@@ -65,6 +65,8 @@ URL_MAPA_PNG = "https://www.cgesp.org/cgesp/mapa_sp_geoserver.png"
 URL_PREVISAO = "https://www.cgesp.org/v3/previsao_estendida.jsp"
 URL_BOLETIM = "https://www.cgesp.org/v3/feed_rss.jsp"
 URL_ESTACAO = "https://www.cgesp.org/v3/estacao.jsp"
+URL_RADAR = "https://www.saisp.br/cgesp/radarIntens.jpg"
+MODIFICADO_EM = "Wed, 18 Nov 2026 16:49:09 GMT"
 
 
 class SiteCge:
@@ -73,6 +75,9 @@ class SiteCge:
     `paginas[url]` pode ser trocado durante o teste: bytes viram resposta
     200; None simula o site fora do ar (erro de conexão). Uma URL que não
     está em `paginas` falha o teste, para nenhuma consulta escapar.
+
+    Com If-Modified-Since igual a `modificado[url]` (o Last-Modified da
+    página), a resposta é 304, como no servidor do radar.
     """
 
     def __init__(self) -> None:
@@ -83,12 +88,19 @@ class SiteCge:
             URL_PREVISAO: self.fixture("previsao.html"),
             URL_BOLETIM: self.fixture("feed_rss.xml"),
             URL_ESTACAO: self.fixture("estacao.html"),
+            URL_RADAR: self.fixture("radar_sem_chuva.jpg"),
         }
+        self.modificado: dict[str, str] = {}
         self.consultas: list[str] = []
 
     @staticmethod
     def fixture(nome: str) -> bytes:
         return (FIXTURES / nome).read_bytes()
+
+    def trocar(self, url: str, conteudo: bytes | None, modificado: str) -> None:
+        """Página nova, com outro Last-Modified."""
+        self.paginas[url] = conteudo
+        self.modificado[url] = modificado
 
     def fora_do_ar(self) -> None:
         for url in self.paginas:
@@ -104,11 +116,16 @@ class SiteCge:
         conteudo = self.paginas[chave]
         if conteudo is None:
             raise requests.exceptions.ConnectionError(f"fora do ar: {url}")
+        modificado = self.modificado.get(chave, MODIFICADO_EM)
         resposta = requests.Response()
-        resposta.status_code = 200
         resposta.url = url
+        resposta.headers["Last-Modified"] = modificado
+        if (headers or {}).get("If-Modified-Since") == modificado:
+            resposta.status_code = 304
+            resposta._content = b""
+            return resposta
+        resposta.status_code = 200
         resposta._content = conteudo
-        resposta.headers["Last-Modified"] = "Wed, 18 Nov 2026 16:49:09 GMT"
         return resposta
 
 

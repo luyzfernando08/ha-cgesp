@@ -23,6 +23,10 @@ EVENTO_ALAGAMENTO_NOVO = "cgesp_alagamento_novo"
 EVENTO_ALAGAMENTO_ENCERRADO = "cgesp_alagamento_encerrado"
 
 ALERTAS_UPDATE_INTERVAL = timedelta(minutes=10)
+# Radar de chuva: 5 min; 15 min sem chuva no radar nem na previsão.
+INTERVALO_RADAR = timedelta(minutes=5)
+INTERVALO_RADAR_SEM_CHUVA = timedelta(minutes=15)
+DATA_RADAR_COORDINATOR = "radar_coordinator"
 DATA_ALERTAS_COORDINATOR = "alertas_coordinator"
 DATA_ALERTAS_USUARIOS = "alertas_usuarios"
 

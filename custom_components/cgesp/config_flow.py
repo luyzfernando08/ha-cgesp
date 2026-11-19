@@ -168,7 +168,7 @@ def _schema_opcoes_alertas(opcoes: dict[str, Any]) -> vol.Schema:
 
 
 class AlertasCidadeOptionsFlow(config_entries.OptionsFlow):
-    """Mapa, alagamentos perto de pessoas/zonas e intervalo de atualização."""
+    """Mapa, pessoas/zonas acompanhadas (alagamentos e chuva) e intervalo."""
 
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
         # Não usar o nome `config_entry`: em versões novas do HA ele é
@@ -180,13 +180,9 @@ class AlertasCidadeOptionsFlow(config_entries.OptionsFlow):
     ) -> FlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            if user_input.get(CONF_ENTIDADES_PROXIMIDADE) and not user_input.get(
-                CONF_GEOCODIFICAR
-            ):
-                # Sem coordenadas dos pontos não há como medir distância.
-                errors[CONF_ENTIDADES_PROXIMIDADE] = "requer_mapa"
-            else:
-                return self.async_create_entry(title="", data=user_input)
+            # Sem os pontos no mapa, as pessoas e zonas escolhidas ganham só
+            # os sensores de chuva (os alagamentos por perto precisam deles).
+            return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(
             step_id="init",

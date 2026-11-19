@@ -1,30 +1,22 @@
-"""Câmeras de imagem: radar de chuva e mapa de alertas do CGE.
+"""Câmeras de imagem: radar de chuva (atual e última hora) e mapa de alertas.
 
-As imagens só são baixadas quando alguém está vendo a câmera (painel ou
-miniatura), com cache para não consultar o servidor a cada poucos segundos.
+As imagens vêm dos coordinators (já baixadas a cada atualização); as câmeras
+não geram consultas extras.
 """
 from __future__ import annotations
 
-import logging
-import time
-
-import aiohttp
+from typing import Any
 
 from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .cge_alertas_coordinator import CgeAlertasCoordinator, async_obter_coordinator
-from .cge_extras import URL_RADAR
-from .entity import CgeAlertasEntity, cgesp_device_info
-
-_LOGGER = logging.getLogger(__name__)
-
-# O radar é atualizado a cada ~5–10 min; não adianta buscar mais que isso.
-CACHE_RADAR_SEGUNDOS = 5 * 60
-TIMEOUT_RADAR = aiohttp.ClientTimeout(total=30)
+from .cge_radar_coordinator import CgeRadarCoordinator
+from .const import INTERVALO_RADAR
+from .entity import CgeAlertasEntity, CgeRadarEntity, obter_radar
 
 
 async def async_setup_entry(
@@ -33,49 +25,76 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator = await async_obter_coordinator(hass, entry.entry_id)
-    async_add_entities([CgeRadarCamera(), CgeMapaAlertasCamera(coordinator)])
+    cameras: list[Camera] = [CgeMapaAlertasCamera(coordinator)]
+    radar = obter_radar(hass)
+    if radar is not None:
+        cameras += [CgeRadarCamera(radar), CgeRadarAnimacaoCamera(radar)]
+    async_add_entities(cameras)
 
 
-class CgeRadarCamera(Camera):
+class _CgeRadarCameraBase(CgeRadarEntity, Camera):
+    _attr_frame_interval = INTERVALO_RADAR.total_seconds()
+
+    def __init__(self, coordinator: CgeRadarCoordinator) -> None:
+        CgeRadarEntity.__init__(self, coordinator)
+        Camera.__init__(self)
+
+
+class CgeRadarCamera(_CgeRadarCameraBase):
     """Precipitação estimada pelo radar (imagem publicada pelo CGE/SAISP)."""
 
     _attr_name = "Radar de chuva"
     _attr_unique_id = "cgesp_radar"
     _attr_icon = "mdi:radar"
-    _attr_attribution = "Radar: SAISP/FCTH, publicado por cgesp.org"
-    _attr_frame_interval = CACHE_RADAR_SEGUNDOS
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, coordinator: CgeRadarCoordinator) -> None:
+        super().__init__(coordinator)
         self.entity_id = "camera.cgesp_radar"
         self.content_type = "image/jpeg"
-        self._imagem: bytes | None = None
-        self._baixada_em = 0.0
-        self._falhou = False
 
     @property
-    def device_info(self):
-        return cgesp_device_info()
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "atualizado_em": dt_util.as_local(self.leitura.obtida_em),
+            "area_com_chuva_pct": round(self.leitura.area_com_chuva() * 100, 2),
+        }
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        if self._imagem is not None and time.monotonic() - self._baixada_em < CACHE_RADAR_SEGUNDOS:
-            return self._imagem
-        sessao = async_get_clientsession(self.hass)
-        try:
-            async with sessao.get(URL_RADAR, timeout=TIMEOUT_RADAR) as resposta:
-                resposta.raise_for_status()
-                imagem = await resposta.read()
-        except (aiohttp.ClientError, TimeoutError) as err:
-            if not self._falhou:
-                _LOGGER.info("CGE: não foi possível baixar a imagem do radar: %s", err)
-            self._falhou = True
-            return self._imagem  # mostra a última imagem boa, se houver
-        self._falhou = False
-        self._imagem = imagem
-        self._baixada_em = time.monotonic()
-        return imagem
+        leitura = self.coordinator.data
+        return leitura.imagem if leitura is not None else None
+
+
+class CgeRadarAnimacaoCamera(_CgeRadarCameraBase):
+    """Animação (GIF) com as imagens do radar da última hora."""
+
+    _attr_name = "Radar de chuva (última hora)"
+    _attr_unique_id = "cgesp_radar_animacao"
+    _attr_icon = "mdi:radar"
+
+    def __init__(self, coordinator: CgeRadarCoordinator) -> None:
+        super().__init__(coordinator)
+        self.entity_id = "camera.cgesp_radar_animacao"
+        self.content_type = "image/gif"
+
+    @property
+    def available(self) -> bool:
+        return super().available and len(self.coordinator.animacao) > 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        horarios = self.coordinator.animacao.horarios
+        return {
+            "quadros": len(horarios),
+            "inicio": dt_util.as_local(horarios[0]) if horarios else None,
+            "fim": dt_util.as_local(horarios[-1]) if horarios else None,
+        }
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        return await self.hass.async_add_executor_job(self.coordinator.animacao.gif)
 
 
 class CgeMapaAlertasCamera(CgeAlertasEntity, Camera):

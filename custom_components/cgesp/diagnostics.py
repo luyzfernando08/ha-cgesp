@@ -15,6 +15,25 @@ from homeassistant.core import HomeAssistant
 
 from .cge_alertas_coordinator import obter_coordinator_existente
 from .const import CONF_ESTACAO_ID, ESTACOES, ESTACOES_REGIAO
+from .entity import obter_radar
+
+
+def _resumo_radar(hass: HomeAssistant) -> dict[str, Any] | None:
+    radar = obter_radar(hass)
+    if radar is None:
+        return None
+    leitura = radar.data
+    return {
+        "ultima_atualizacao_ok": radar.last_update_success,
+        "ultimo_erro": str(radar.last_exception) if radar.last_exception else None,
+        "intervalo_atual": str(radar.update_interval),
+        "motivo_intervalo": radar.motivo_intervalo,
+        "erro_layout": radar.erro_layout,
+        "imagem_de": leitura.obtida_em.isoformat() if leitura else None,
+        "imagem_bytes": len(leitura.imagem) if leitura else None,
+        "celulas_com_chuva": sum(1 for n in leitura.celulas if n) if leitura else None,
+        "quadros_animacao": len(radar.animacao),
+    }
 
 
 def _resumo_alertas(hass: HomeAssistant) -> dict[str, Any] | None:
@@ -84,4 +103,6 @@ async def async_get_config_entry_diagnostics(
             "regiao": ESTACOES_REGIAO.get(estacao_id),
         }
     diagnostico["alertas"] = _resumo_alertas(hass)
+    if entry.data.get(CONF_ESTACAO_ID) is None:
+        diagnostico["radar"] = _resumo_radar(hass)
     return diagnostico

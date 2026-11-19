@@ -151,7 +151,10 @@ async def test_opcoes_salvam(hass: HomeAssistant, site_cge) -> None:
     assert entrada.options[CONF_RAIO_KM] == 3.5
 
 
-async def test_opcoes_proximidade_exige_mapa(hass: HomeAssistant, site_cge) -> None:
+async def test_opcoes_pessoas_sem_o_mapa(hass: HomeAssistant, site_cge) -> None:
+    """Sem os pontos no mapa, a pessoa ganha só os sensores de chuva do radar
+    (os alagamentos por perto precisam das coordenadas dos pontos)."""
+    hass.states.async_set("person.joao", "home", {"latitude": -23.56, "longitude": -46.65})
     entrada = await _entrada_alertas(hass)
 
     resultado = await hass.config_entries.options.async_init(entrada.entry_id)
@@ -159,10 +162,12 @@ async def test_opcoes_proximidade_exige_mapa(hass: HomeAssistant, site_cge) -> N
         resultado["flow_id"],
         {CONF_GEOCODIFICAR: False, CONF_ENTIDADES_PROXIMIDADE: ["person.joao"]},
     )
+    await hass.async_block_till_done()
 
-    assert resultado["type"] is FlowResultType.FORM
-    assert resultado["errors"] == {CONF_ENTIDADES_PROXIMIDADE: "requer_mapa"}
-    assert CONF_ENTIDADES_PROXIMIDADE not in entrada.options
+    assert resultado["type"] is FlowResultType.CREATE_ENTRY
+    assert entrada.options[CONF_ENTIDADES_PROXIMIDADE] == ["person.joao"]
+    assert hass.states.get("sensor.cgesp_chuva_joao") is not None
+    assert hass.states.get("sensor.cgesp_alagamentos_perto_joao") is None
 
 
 async def test_estacao_nao_tem_opcoes(hass: HomeAssistant, site_cge) -> None:

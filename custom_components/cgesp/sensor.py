@@ -1,8 +1,9 @@
 """Sensores.
 
 Estações: estado de alerta da área monitorada.
-Alertas da cidade: contadores de alagamentos, último boletim do CGE e
-alagamentos perto de pessoas, rastreadores ou zonas.
+Alertas da cidade: contadores de alagamentos, último boletim do CGE e, para
+cada pessoa, rastreador ou zona escolhida, alagamentos por perto e a chuva no
+local pelo radar (intensidade e distância até a chuva mais próxima).
 """
 from __future__ import annotations
 
@@ -14,11 +15,9 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_FRIENDLY_NAME, ATTR_LATITUDE, ATTR_LONGITUDE
-from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.const import UnitOfLength
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
@@ -29,6 +28,8 @@ from .cge_alertas_coordinator import (
     async_obter_coordinator,
 )
 from .cge_extras import pontos_proximos
+from .cge_radar import FORTE, NIVEIS
+from .cge_radar_coordinator import CgeRadarCoordinator
 from .const import (
     CONF_ENTIDADES_PROXIMIDADE,
     CONF_ESTACAO_ID,
@@ -41,10 +42,19 @@ from .const import (
     TIPO_ALERTAS_CIDADE,
     ZONAS,
 )
-from .entity import CgeAlertasEntity, CgeEstacaoAlertaEntity
+from .entity import (
+    CgeAlertasEntity,
+    CgeEstacaoAlertaEntity,
+    CgeRadarEntity,
+    EntidadeAcompanhada,
+    obter_radar,
+    remover_orfas,
+)
 
 UNIDADE_PONTOS = "pontos"
 PREFIXO_PROXIMIDADE = "cgesp_proximidade_"
+PREFIXO_CHUVA = "cgesp_chuva_"
+PREFIXO_CHUVA_PROXIMA = "cgesp_chuva_mais_proxima_"
 
 
 async def async_setup_entry(
@@ -63,12 +73,23 @@ async def async_setup_entry(
         raio = float(entry.options.get(CONF_RAIO_KM, RAIO_KM_PADRAO))
         geocodificar = bool(entry.options.get(CONF_GEOCODIFICAR, False))
         acompanhadas = list(entry.options.get(CONF_ENTIDADES_PROXIMIDADE, []))
-        _remover_proximidade_antiga(hass, entry, acompanhadas)
-        entidades.extend(
-            CgeProximidadeSensor(coordinator, entidade, raio, geocodificar)
-            for entidade in acompanhadas
+        radar = obter_radar(hass)
+        por_entidade: list[SensorEntity] = []
+        for entidade in acompanhadas:
+            # Alagamentos perto só com os pontos no mapa (precisa das coordenadas).
+            if geocodificar:
+                por_entidade.append(CgeProximidadeSensor(coordinator, entidade, raio))
+            if radar is not None:
+                por_entidade.append(CgeChuvaSensor(radar, entidade))
+                por_entidade.append(CgeChuvaProximaSensor(radar, entidade))
+        remover_orfas(
+            hass,
+            entry,
+            "sensor",
+            (PREFIXO_PROXIMIDADE, PREFIXO_CHUVA, PREFIXO_CHUVA_PROXIMA),
+            {e.unique_id for e in por_entidade if e.unique_id},
         )
-        async_add_entities(entidades)
+        async_add_entities([*entidades, *por_entidade])
         return
 
     estacao_id: int = entry.data[CONF_ESTACAO_ID]
@@ -77,21 +98,6 @@ async def async_setup_entry(
 
     coordinator = await async_obter_coordinator(hass, entry.entry_id)
     async_add_entities([CgeEstadoAlertaSensor(coordinator, estacao_id)])
-
-
-def _remover_proximidade_antiga(
-    hass: HomeAssistant, entry: ConfigEntry, acompanhadas: list[str]
-) -> None:
-    """Quem saiu das opções não deve ficar como entidade órfã no registro."""
-    registro = er.async_get(hass)
-    validos = {f"{PREFIXO_PROXIMIDADE}{entidade}" for entidade in acompanhadas}
-    for registrada in er.async_entries_for_config_entry(registro, entry.entry_id):
-        if (
-            registrada.domain == "sensor"
-            and registrada.unique_id.startswith(PREFIXO_PROXIMIDADE)
-            and registrada.unique_id not in validos
-        ):
-            registro.async_remove(registrada.entity_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -239,7 +245,7 @@ class CgeBoletimSensor(CgeAlertasEntity, SensorEntity):
 # --------------------------------------------------------------------------- #
 
 
-class CgeProximidadeSensor(_CgeAlagamentosEntity, SensorEntity):
+class CgeProximidadeSensor(EntidadeAcompanhada, _CgeAlagamentosEntity, SensorEntity):
     """Quantos alagamentos ativos estão a até `raio_km` de uma pessoa,
     rastreador ou zona. Recalcula quando a entidade se move."""
 
@@ -248,75 +254,35 @@ class CgeProximidadeSensor(_CgeAlagamentosEntity, SensorEntity):
     _attr_icon = "mdi:map-marker-radius"
 
     def __init__(
-        self,
-        coordinator: CgeAlertasCoordinator,
-        entidade: str,
-        raio_km: float,
-        geocodificar: bool,
+        self, coordinator: CgeAlertasCoordinator, entidade: str, raio_km: float
     ) -> None:
         super().__init__(coordinator)
-        self.entidade = entidade
+        self._acompanhar(entidade)
         self.raio_km = raio_km
-        self.geocodificar = geocodificar
-        dominio, objeto = entidade.split(".", 1)
         self._attr_unique_id = f"{PREFIXO_PROXIMIDADE}{entidade}"
-        sufixo = objeto if dominio == "person" else f"{dominio}_{objeto}"
-        self.entity_id = f"sensor.cgesp_alagamentos_perto_{slugify(sufixo)}"
-        self._objeto = objeto
-
-    def _nome_da_entidade(self) -> str:
-        estado = self.hass.states.get(self.entidade) if self.hass else None
-        if estado is not None and estado.attributes.get(ATTR_FRIENDLY_NAME):
-            return estado.attributes[ATTR_FRIENDLY_NAME]
-        return self._objeto
+        self.entity_id = f"sensor.cgesp_alagamentos_perto_{self.sufixo}"
 
     @property
     def name(self) -> str:
         return f"Alagamentos perto de {self._nome_da_entidade()}"
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self.async_on_remove(
-            async_track_state_change_event(
-                self.hass, [self.entidade], self._entidade_mudou
-            )
-        )
-
-    @callback
-    def _entidade_mudou(self, _evento: Event) -> None:
-        self.async_write_ha_state()
-
-    def _posicao(self) -> tuple[float, float] | None:
-        estado = self.hass.states.get(self.entidade)
-        if estado is None:
-            return None
-        lat = estado.attributes.get(ATTR_LATITUDE)
-        lon = estado.attributes.get(ATTR_LONGITUDE)
-        try:
-            return float(lat), float(lon)
-        except (TypeError, ValueError):
-            return None
-
-    def _calcular(self) -> tuple[list[tuple[PontoAlagamento, float]] | None, str | None]:
-        """(pontos próximos, motivo) — pontos None quando não dá para calcular."""
-        if not self.geocodificar:
-            return None, "a opção de mostrar os pontos no mapa está desligada"
+    def _proximos(self) -> list[tuple[PontoAlagamento, float]] | None:
         posicao = self._posicao()
         if posicao is None:
-            return None, f"{self.entidade} não tem localização (latitude/longitude)"
-        return pontos_proximos(*posicao, self.dados.pontos_ativos(), self.raio_km), None
+            return None
+        return pontos_proximos(*posicao, self.dados.pontos_ativos(), self.raio_km)
 
     @property
     def native_value(self) -> int | None:
-        proximos, _ = self._calcular()
+        proximos = self._proximos()
         return None if proximos is None else len(proximos)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        proximos, motivo = self._calcular()
+        proximos = self._proximos()
         atributos: dict[str, Any] = {"entidade": self.entidade, "raio_km": self.raio_km}
         if proximos is None:
-            atributos["motivo"] = motivo
+            atributos["motivo"] = self._sem_posicao()
             return atributos
         nao_localizados = sum(1 for p in self.dados.pontos_ativos() if not p.localizado)
         atributos.update(
@@ -333,6 +299,112 @@ class CgeProximidadeSensor(_CgeAlagamentosEntity, SensorEntity):
                 ],
                 # Pontos ainda sem coordenada não entram na conta.
                 "pontos_sem_localizacao": nao_localizados,
+            }
+        )
+        return atributos
+
+
+# --------------------------------------------------------------------------- #
+# Radar de chuva
+# --------------------------------------------------------------------------- #
+
+
+def _atualizado_em(leitura) -> Any:
+    return dt_util.as_local(leitura.obtida_em)
+
+
+class CgeChuvaSensor(EntidadeAcompanhada, CgeRadarEntity, SensorEntity):
+    """Intensidade da chuva agora no local da pessoa, rastreador ou zona."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(NIVEIS)
+    _attr_translation_key = "chuva"
+    _attr_icon = "mdi:weather-rainy"
+
+    def __init__(self, coordinator: CgeRadarCoordinator, entidade: str) -> None:
+        super().__init__(coordinator)
+        self._acompanhar(entidade)
+        self._attr_unique_id = f"{PREFIXO_CHUVA}{entidade}"
+        self.entity_id = f"sensor.cgesp_chuva_{self.sufixo}"
+
+    @property
+    def name(self) -> str:
+        return f"Chuva em {self._nome_da_entidade()}"
+
+    def _nivel(self) -> tuple[int | None, str | None]:
+        posicao = self._posicao()
+        if posicao is None:
+            return None, self._sem_posicao()
+        nivel = self.leitura.nivel_em(*posicao)
+        if nivel is None:
+            return None, "fora da área coberta pela imagem do radar"
+        return nivel, None
+
+    @property
+    def native_value(self) -> str | None:
+        nivel, _ = self._nivel()
+        return None if nivel is None else NIVEIS[nivel]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        _, motivo = self._nivel()
+        atributos: dict[str, Any] = {
+            "entidade": self.entidade,
+            "radar_atualizado_em": _atualizado_em(self.leitura),
+        }
+        if motivo:
+            atributos["motivo"] = motivo
+        return atributos
+
+
+class CgeChuvaProximaSensor(EntidadeAcompanhada, CgeRadarEntity, SensorEntity):
+    """Distância da pessoa, rastreador ou zona até a chuva mais próxima
+    (0 quando está chovendo no local)."""
+
+    _attr_device_class = SensorDeviceClass.DISTANCE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfLength.KILOMETERS
+    _attr_suggested_display_precision = 1
+    _attr_icon = "mdi:map-marker-distance"
+
+    def __init__(self, coordinator: CgeRadarCoordinator, entidade: str) -> None:
+        super().__init__(coordinator)
+        self._acompanhar(entidade)
+        self._attr_unique_id = f"{PREFIXO_CHUVA_PROXIMA}{entidade}"
+        self.entity_id = f"sensor.cgesp_chuva_mais_proxima_{self.sufixo}"
+
+    @property
+    def name(self) -> str:
+        return f"Chuva mais próxima de {self._nome_da_entidade()}"
+
+    @property
+    def native_value(self) -> float | None:
+        posicao = self._posicao()
+        if posicao is None:
+            return None
+        chuva = self.leitura.chuva_mais_proxima(*posicao)
+        return None if chuva is None else round(chuva.distancia_km, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        atributos: dict[str, Any] = {
+            "entidade": self.entidade,
+            "radar_atualizado_em": _atualizado_em(self.leitura),
+        }
+        posicao = self._posicao()
+        if posicao is None:
+            atributos["motivo"] = self._sem_posicao()
+            return atributos
+        chuva = self.leitura.chuva_mais_proxima(*posicao)
+        forte = self.leitura.chuva_mais_proxima(*posicao, nivel_minimo=FORTE)
+        if chuva is None:
+            atributos["motivo"] = "sem chuva na imagem do radar"
+        atributos.update(
+            {
+                "intensidade": chuva.intensidade if chuva else None,
+                "direcao": chuva.direcao if chuva else None,
+                "chuva_forte_km": round(forte.distancia_km, 2) if forte else None,
+                "chuva_forte_direcao": forte.direcao if forte else None,
             }
         )
         return atributos

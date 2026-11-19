@@ -27,7 +27,6 @@ from .cge_alertas import (
 URL_PREVISAO = "https://www.cgesp.org/v3/previsao_estendida.jsp"
 URL_BOLETIM = "https://www.cgesp.org/v3/feed_rss.jsp"
 URL_NOTICIAS = "https://www.cgesp.org/v3/"
-URL_RADAR = "https://www.saisp.br/cgesp/radarIntens.jpg"
 
 INTERVALO_COM_CHUVA = timedelta(minutes=10)
 INTERVALO_SEM_CHUVA = timedelta(minutes=30)

@@ -22,7 +22,6 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
 
-from custom_components.cgesp.cge_extras import URL_RADAR
 from custom_components.cgesp.const import (
     CONF_INTERVALO_ADAPTATIVO,
     CONF_TIPO,
@@ -75,6 +74,7 @@ async def test_cria_as_entidades(hass: HomeAssistant, site_cge) -> None:
         "sensor.cgesp_alagamentos_hoje",
         "sensor.cgesp_boletim",
         "camera.cgesp_radar",
+        "camera.cgesp_radar_animacao",
         "camera.cgesp_mapa_alertas",
     ]
     for entity_id in esperadas:
@@ -142,37 +142,6 @@ async def test_camera_mapa_de_alertas(hass: HomeAssistant, site_cge) -> None:
 
     assert imagem.content_type == "image/png"
     assert imagem.content == site_cge.fixture("mapa_alertas.png")
-
-
-async def test_camera_radar_com_cache(hass: HomeAssistant, site_cge, aioclient_mock) -> None:
-    aioclient_mock.get(URL_RADAR, content=b"jpeg-do-radar")
-    await _configurar(hass)
-
-    primeira = await async_get_image(hass, "camera.cgesp_radar")
-    segunda = await async_get_image(hass, "camera.cgesp_radar")
-
-    assert primeira.content == segunda.content == b"jpeg-do-radar"
-    assert primeira.content_type == "image/jpeg"
-    # A segunda veio do cache: o servidor do radar só foi consultado uma vez.
-    assert aioclient_mock.call_count == 1
-
-
-async def test_camera_radar_mantem_ultima_imagem(
-    hass: HomeAssistant, site_cge, aioclient_mock, freezer
-) -> None:
-    aioclient_mock.get(URL_RADAR, content=b"jpeg-antigo")
-    await _configurar(hass)
-    assert (await async_get_image(hass, "camera.cgesp_radar")).content == b"jpeg-antigo"
-
-    aioclient_mock.clear_requests()
-    aioclient_mock.get(URL_RADAR, status=500)
-    camera = hass.data["camera"].get_entity("camera.cgesp_radar")
-    camera._baixada_em -= 10 * 60  # cache vencido
-
-    imagem = await camera.async_camera_image()
-
-    assert aioclient_mock.call_count == 1
-    assert imagem == b"jpeg-antigo"
 
 
 # ------------------------------------------------------------------ site fora do ar
