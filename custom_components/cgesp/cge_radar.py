@@ -6,6 +6,8 @@ moderada, forte e muito forte). Daqui saem:
 
 - a intensidade da chuva num ponto (casa, pessoa, zona);
 - a chuva mais próxima de um ponto (distância, intensidade e direção);
+- o movimento da chuva entre duas imagens e, com ele, quando a chuva deve
+  chegar a um ponto;
 - a animação da última hora (GIF).
 
 A posição dos eixos foi medida na imagem. Se o layout mudar, `ler_radar`
@@ -18,10 +20,11 @@ import math
 import threading
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import cached_property
+from zoneinfo import ZoneInfo
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 URL_RADAR = "https://www.saisp.br/cgesp/radarIntens.jpg"
 
@@ -56,7 +59,42 @@ CELULA = 4
 _MINIMO_PIXELS = 3  # pixels de chuva numa célula para ela contar
 
 KM_POR_GRAU = 111.32
+# Tamanho de uma célula em km (no centro da imagem, latitude -23,6).
+KM_CELULA_X = CELULA / _PX_LON * KM_POR_GRAU * math.cos(math.radians(23.6))
+KM_CELULA_Y = CELULA / _PX_LAT * KM_POR_GRAU
 _DIRECOES = ("norte", "nordeste", "leste", "sudeste", "sul", "sudoeste", "oeste", "noroeste")
+
+# ---- Horário da imagem -----------------------------------------------------
+# O título diz a hora do radar ("Atualizado em: 22-11-2026 17:20 Local"). O
+# servidor publica cada imagem de 7 a 12 minutos depois, com atraso variável,
+# então o Last-Modified não serve para medir a velocidade da chuva.
+FUSO_SP = ZoneInfo("America/Sao_Paulo")
+_TITULO = (300, 5, 700, 40)
+# Assinatura de cada dígito do título: o glifo reduzido a 8 x 12 pixels, 1 bit
+# por pixel (escuro = 1), linha a linha. Medidas nas imagens do servidor.
+_DIGITOS: dict[int, int] = {
+    0: 0x3C7EE7C3C3C3C3C3C3E77E3C,
+    1: 0x070FFFFF0F0F0F0F0F0F0F0F,
+    2: 0x3C7FE7C303070E3C70F0FFFF,
+    3: 0x3CFEE7C7061E1F07C3E7FF3C,
+    4: 0x0E1E1E3E266646FEFF0E0606,
+    5: 0x7F7F60C0FEFF070303E7FE3C,
+    6: 0x3C7FE3C0FEFFE3C3C3E77E3C,
+    7: 0xFFFF06060C0C181818303030,
+    8: 0x3C7E6666663E7EE7C3667E3C,
+    9: 0x1C7E6763E3637F3F03677E3C,
+}
+_DISTANCIA_DIGITO = 6  # bits diferentes tolerados
+
+# ---- Movimento e previsão ----------------------------------------------------
+# A velocidade é medida entre duas imagens com 5 a 20 minutos de diferença
+# (de preferência 10, que dá mais precisão que 5).
+INTERVALO_MOVIMENTO = (timedelta(minutes=5), timedelta(minutes=20))
+INTERVALO_MOVIMENTO_IDEAL = timedelta(minutes=10)
+_VELOCIDADE_MAXIMA_KMH = 100
+_FATOR_GROSSO = 3  # a busca começa numa grade 3x mais grossa
+HORIZONTE_PREVISAO = 60  # minutos
+_CONFIANCA_MINIMA = 0.5
 
 # Animação.
 JANELA_ANIMACAO = timedelta(hours=1)
@@ -86,6 +124,46 @@ class ChuvaProxima:
         return NIVEIS[self.nivel]
 
 
+@dataclass(frozen=True)
+class Movimento:
+    """Velocidade da chuva, em células por minuto (vx para leste, vy para o
+    sul, como as linhas da imagem)."""
+
+    vx: float
+    vy: float
+    confianca: float  # correlação entre as duas imagens (0 a 1)
+    minutos: float  # intervalo entre as imagens usadas
+
+    @property
+    def velocidade_kmh(self) -> float:
+        return math.hypot(self.vx * KM_CELULA_X, self.vy * KM_CELULA_Y) * 60
+
+    @property
+    def indo_para(self) -> str | None:
+        """Direção para onde a chuva vai; None se está quase parada."""
+        if self.velocidade_kmh < 3:
+            return None
+        return _direcao(self.vx * KM_CELULA_X, -self.vy * KM_CELULA_Y)
+
+    @property
+    def vindo_de(self) -> str | None:
+        if self.velocidade_kmh < 3:
+            return None
+        return _direcao(-self.vx * KM_CELULA_X, self.vy * KM_CELULA_Y)
+
+
+@dataclass(frozen=True)
+class ChegadaChuva:
+    minutos: int  # a partir de agora; 0 = já deve estar chovendo no ponto
+    nivel_maximo: int  # a mais forte prevista no ponto dentro do horizonte
+    movimento: Movimento
+    chega_as: datetime
+
+    @property
+    def intensidade_maxima(self) -> str:
+        return NIVEIS[self.nivel_maximo]
+
+
 @dataclass
 class LeituraRadar:
     imagem: bytes  # JPEG original, servido pela câmera
@@ -95,6 +173,10 @@ class LeituraRadar:
     colunas: int
     linhas: int
     quadro: Image.Image | None = field(default=None, repr=False)  # para a animação
+    # Hora do radar (lida no título); None se não deu para ler.
+    horario: datetime | None = None
+    # Deslocamento da chuva medido contra uma imagem anterior.
+    movimento: Movimento | None = None
 
     # ------------------------------------------------ consultas
 
@@ -146,6 +228,55 @@ class LeituraRadar:
             return None
         km, nivel, dx, dy = melhor
         return ChuvaProxima(km, nivel, _direcao(dx, dy))
+
+    def chegada_da_chuva(
+        self,
+        latitude: float,
+        longitude: float,
+        agora: datetime | None = None,
+        horizonte: int = HORIZONTE_PREVISAO,
+    ) -> ChegadaChuva | None:
+        """Em quantos minutos a partir de `agora` a chuva deve chegar ao ponto,
+        empurrando a chuva da imagem com a velocidade medida. A imagem é de
+        `horario`, uns 10 minutos antes de `agora` (o servidor demora para
+        publicar), então a conta começa nesse atraso. None sem movimento
+        medido, fora da imagem ou se nenhuma chuva chega dentro do horizonte."""
+        celula = self._celula(latitude, longitude)
+        movimento = self.movimento
+        if celula is None or movimento is None or self.horario is None:
+            return None
+        atraso = 0
+        if agora is not None:
+            atraso = max(0, round((agora - self.horario).total_seconds() / 60))
+        coluna, linha = celula
+        chegada: int | None = None
+        maximo = SEM_CHUVA
+        for minuto in range(atraso, atraso + horizonte + 1):
+            # A chuva que estará no ponto `minuto` minutos depois da imagem é
+            # a que está nela em ponto - velocidade * minuto.
+            nivel = self._nivel_celula(
+                round(coluna - movimento.vx * minuto), round(linha - movimento.vy * minuto)
+            )
+            if nivel is None:
+                break  # veio de fora da imagem: não dá para saber
+            if nivel:
+                if chegada is None:
+                    chegada = minuto
+                maximo = max(maximo, nivel)
+        if chegada is None:
+            return None
+        return ChegadaChuva(
+            chegada - atraso, maximo, movimento, self.horario + timedelta(minutes=chegada)
+        )
+
+    def _nivel_celula(self, coluna: int, linha: int) -> int | None:
+        if not (0 <= coluna < self.colunas and 0 <= linha < self.linhas):
+            return None
+        x = _AREA[0] + (coluna + 0.5) * CELULA
+        y = _AREA[1] + (linha + 0.5) * CELULA
+        if _na_legenda(x, y):
+            return None
+        return self.celulas[linha * self.colunas + coluna]
 
     @cached_property
     def _indices_com_chuva(self) -> list[int]:
@@ -241,9 +372,88 @@ def _celulas(imagem: Image.Image) -> tuple[bytes, int, int]:
     return bytes(celulas), colunas, linhas
 
 
+def _glifos_do_titulo(imagem: Image.Image) -> list[Image.Image]:
+    """Os caracteres do fim do título, recortados (separados por colunas sem
+    pixel escuro)."""
+    titulo = imagem.convert("L").crop(_TITULO)
+    largura, altura = titulo.size
+    pixels = titulo.load()
+    escura = [any(pixels[x, y] < 140 for y in range(altura)) for x in range(largura)]
+    glifos = []
+    x = 0
+    while x < largura:
+        if not escura[x]:
+            x += 1
+            continue
+        inicio = x
+        while x < largura and escura[x]:
+            x += 1
+        caixa = titulo.crop((inicio, 0, x, altura))
+        cp = caixa.load()
+        linhas = [y for y in range(altura) if any(cp[i, y] < 140 for i in range(x - inicio))]
+        glifos.append(caixa.crop((0, linhas[0], x - inicio, linhas[-1] + 1)))
+    return glifos
+
+
+def _assinatura(glifo: Image.Image) -> int:
+    pixels = glifo.resize((8, 12), Image.Resampling.BILINEAR).load()
+    bits = 0
+    for y in range(12):
+        for x in range(8):
+            bits = bits << 1 | (pixels[x, y] < 128)
+    return bits
+
+
+def _digito(glifo: Image.Image) -> int | None:
+    assinatura = _assinatura(glifo)
+    distancia, digito = min(
+        (bin(assinatura ^ modelo).count("1"), digito) for digito, modelo in _DIGITOS.items()
+    )
+    return digito if distancia <= _DISTANCIA_DIGITO else None
+
+
+def ler_hora_do_titulo(imagem: Image.Image) -> tuple[int, int] | None:
+    """(hora, minuto) do título "... HH:MM Local"; None se não deu para ler."""
+    glifos = _glifos_do_titulo(imagem)
+    # Do fim: "Local" (5 glifos), M2, M1, ":", H2, H1.
+    if len(glifos) < 10:
+        return None
+    digitos = [_digito(glifos[i]) for i in (-10, -9, -7, -6)]
+    if None in digitos:
+        return None
+    h1, h2, m1, m2 = digitos
+    hora, minuto = h1 * 10 + h2, m1 * 10 + m2  # type: ignore[operator]
+    if hora > 23 or minuto > 59:
+        return None
+    return hora, minuto
+
+
+def horario_do_radar(
+    hora_minuto: tuple[int, int] | None, publicada_em: datetime
+) -> datetime | None:
+    """A hora do título vira data e hora completas: o último HH:MM em São
+    Paulo antes da publicação (o título não diz o fuso)."""
+    if hora_minuto is None:
+        return None
+    if publicada_em.tzinfo is None:
+        publicada_em = publicada_em.replace(tzinfo=timezone.utc)
+    publicada = publicada_em.astimezone(FUSO_SP)
+    horario = publicada.replace(
+        hour=hora_minuto[0], minute=hora_minuto[1], second=0, microsecond=0
+    )
+    if horario > publicada + timedelta(minutes=5):
+        horario -= timedelta(days=1)
+    if publicada - horario > timedelta(hours=3):
+        return None  # atrasada demais: melhor não confiar
+    return horario.astimezone(timezone.utc)
+
+
 def ler_radar(conteudo: bytes, obtida_em: datetime) -> LeituraRadar:
     """Lê a imagem do radar. Levanta RadarImagemInvalida se o conteúdo não é
-    uma imagem inteira, e RadarLayoutError se o layout mudou."""
+    uma imagem inteira, e RadarLayoutError se o layout mudou.
+
+    `obtida_em` é a hora de publicação (Last-Modified); a hora do radar, lida
+    no título, fica em `horario`."""
     try:
         imagem = Image.open(io.BytesIO(conteudo))
         imagem.load()
@@ -255,7 +465,92 @@ def ler_radar(conteudo: bytes, obtida_em: datetime) -> LeituraRadar:
     _verificar_layout(imagem)
     celulas, colunas, linhas = _celulas(imagem)
     quadro = imagem.resize(TAMANHO_ANIMACAO, Image.Resampling.LANCZOS)
-    return LeituraRadar(conteudo, obtida_em, celulas, colunas, linhas, quadro)
+    try:
+        hora_minuto = ler_hora_do_titulo(imagem)
+    except (IndexError, ValueError):
+        hora_minuto = None
+    horario = horario_do_radar(hora_minuto, obtida_em)
+    return LeituraRadar(conteudo, obtida_em, celulas, colunas, linhas, quadro, horario)
+
+
+# --------------------------------------------------------------------------- #
+# Movimento
+# --------------------------------------------------------------------------- #
+
+
+def _grade(leitura: LeituraRadar) -> Image.Image:
+    """As células como imagem em tons de cinza (mais forte = mais claro), um
+    pouco borrada para a correlação variar suavemente."""
+    valores = bytes(nivel * 60 for nivel in leitura.celulas)
+    grade = Image.frombytes("L", (leitura.colunas, leitura.linhas), valores)
+    return grade.filter(ImageFilter.BoxBlur(2))
+
+
+def _correlacao_maxima(
+    anterior: Image.Image,
+    atual: Image.Image,
+    janela: tuple[int, int, int, int],
+    candidatos: list[tuple[int, int]],
+) -> tuple[float, int, int] | None:
+    """O deslocamento (dx, dy) que mais aproxima `anterior` de `atual` na
+    janela, por correlação normalizada."""
+    x0, y0, x1, y1 = janela
+    alvo = atual.crop(janela)
+    energia_alvo = ImageStat.Stat(ImageChops.multiply(alvo, alvo)).sum[0]
+    if energia_alvo == 0:
+        return None
+    melhor: tuple[float, int, int] | None = None
+    for dx, dy in candidatos:
+        origem = anterior.crop((x0 - dx, y0 - dy, x1 - dx, y1 - dy))
+        energia = ImageStat.Stat(ImageChops.multiply(origem, origem)).sum[0]
+        if energia == 0:
+            continue
+        produto = ImageStat.Stat(ImageChops.multiply(origem, alvo)).sum[0]
+        correlacao = produto / math.sqrt(energia * energia_alvo)
+        if melhor is None or correlacao > melhor[0]:
+            melhor = (correlacao, dx, dy)
+    return melhor
+
+
+def medir_movimento(anterior: LeituraRadar, atual: LeituraRadar) -> Movimento | None:
+    """Velocidade da chuva entre duas leituras (com `horario`). None sem
+    chuva, com intervalo fora de INTERVALO_MOVIMENTO ou correlação fraca."""
+    if anterior.horario is None or atual.horario is None:
+        return None
+    intervalo = atual.horario - anterior.horario
+    if not INTERVALO_MOVIMENTO[0] <= intervalo <= INTERVALO_MOVIMENTO[1]:
+        return None
+    if not (anterior.tem_chuva and atual.tem_chuva):
+        return None
+    minutos = intervalo.total_seconds() / 60
+    alcance = math.ceil(
+        _VELOCIDADE_MAXIMA_KMH / 60 * minutos / min(KM_CELULA_X, KM_CELULA_Y)
+    )
+    a, b = _grade(anterior), _grade(atual)
+    margem = 10
+    janela = (margem, margem, atual.colunas - margem, atual.linhas - margem)
+
+    # Primeiro numa grade 3x mais grossa, depois refina em volta.
+    f = _FATOR_GROSSO
+    grossa_a = a.resize((a.width // f, a.height // f), Image.Resampling.BOX)
+    grossa_b = b.resize((b.width // f, b.height // f), Image.Resampling.BOX)
+    r = alcance // f + 1
+    grosso = _correlacao_maxima(
+        grossa_a,
+        grossa_b,
+        (janela[0] // f, janela[1] // f, janela[2] // f, janela[3] // f),
+        [(dx, dy) for dy in range(-r, r + 1) for dx in range(-r, r + 1)],
+    )
+    if grosso is None:
+        return None
+    cx, cy = grosso[1] * f, grosso[2] * f
+    fino = _correlacao_maxima(
+        a, b, janela, [(cx + dx, cy + dy) for dy in range(-f, f + 1) for dx in range(-f, f + 1)]
+    )
+    if fino is None or fino[0] < _CONFIANCA_MINIMA:
+        return None
+    correlacao, dx, dy = fino
+    return Movimento(dx / minutos, dy / minutos, round(correlacao, 3), minutos)
 
 
 # --------------------------------------------------------------------------- #

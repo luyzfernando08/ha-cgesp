@@ -8,7 +8,7 @@ Traz para o Home Assistant os dados do [CGE](https://www.cgesp.org/v3/), o Centr
 - **Alagamentos por zona:** um sensor para cada zona (Norte, Sul, Leste, Oeste e Centro) que liga quando há alagamento ativo, com os bairros e as ruas afetadas.
 - **Estado de alerta da sua região:** o mesmo estado que o CGE mostra no mapa da página inicial (Observação, Atenção, Iminência de transbordamento ou Alerta), com o horário da última atualização do mapa.
 - **Alagamentos no mapa (opcional):** cada ponto alagado aparece no cartão de mapa do Home Assistant.
-- **Chuva em casa, agora:** para cada pessoa, rastreador ou zona que você escolher, o radar diz se está chovendo no local, com qual intensidade e a que distância está a chuva mais próxima. Dá para avisar antes de a chuva chegar.
+- **Chuva em casa, agora e daqui a pouco:** para cada pessoa, rastreador ou zona que você escolher, o radar diz se está chovendo no local, com qual intensidade, a que distância está a chuva mais próxima e **em quantos minutos ela deve chegar**, pelo movimento da chuva entre as últimas imagens.
 - **Alagamentos perto de quem você quiser:** um sensor por pessoa, rastreador ou zona, com quantos alagamentos estão a menos de X km. Ele acompanha a pessoa enquanto ela se move.
 - **Contadores:** alagamentos ativos na cidade e em cada zona, e quantos houve no dia. Eles entram nas estatísticas do HA, então dá para fazer gráficos.
 - **Boletim do CGE:** o texto mais recente publicado pelo CGE, com a tendência para os próximos dias.
@@ -226,8 +226,21 @@ A integração lê a imagem do radar e descobre a chuva no ponto exato de cada u
 | `binary_sensor.cgesp_chovendo_zone_home` | Ligado quando o radar mostra chuva no local |
 | `sensor.cgesp_chuva_zone_home` | A intensidade no local: sem chuva, fraca, moderada, forte ou muito forte |
 | `sensor.cgesp_chuva_mais_proxima_zone_home` | Distância em km até a chuva mais próxima (0 quando está chovendo no local) |
+| `sensor.cgesp_chuva_chega_em_zone_home` | Em quantos minutos a chuva deve chegar (0 quando já está chovendo no local) |
 
 O sensor de distância também traz nos atributos a `intensidade` e a `direcao` dessa chuva (norte, nordeste, leste…), e `chuva_forte_km` e `chuva_forte_direcao` para a chuva forte ou muito forte mais próxima. Quando não há chuva em nenhum lugar da imagem, a distância fica *desconhecida*.
+
+### Quando a chuva chega
+
+A integração compara a imagem do radar com a de uns 10 minutos antes e mede para onde e a que velocidade a chuva está andando. Depois, "empurra" a chuva atual nessa direção, minuto a minuto, até 60 minutos, e vê quando ela passa pelo local. Se a chuva está indo para outro lado ou vai passar ao lado, o sensor fica *desconhecido*, com o motivo no atributo `motivo`.
+
+O sensor também traz `chega_as` (o horário previsto), `intensidade_maxima` (a chuva mais forte prevista no local na próxima hora), `vindo_de` (oeste, sudoeste…) e `velocidade_kmh`.
+
+O servidor publica cada imagem do radar de 7 a 15 minutos depois de ela ser feita. A integração lê a hora da imagem no título e desconta esse atraso: os minutos do sensor contam a partir de agora. A câmera `camera.cgesp_radar` mostra a direção e a velocidade da chuva na cidade (`chuva_indo_para` e `chuva_velocidade_kmh`).
+
+Numa chuva de novembro de 2026, conferida contra as imagens seguintes do radar, de cada 10 locais em que a integração previu chuva, 9 tiveram chuva de verdade, e o horário de chegada errou em 3 minutos na metade dos casos e em até 8 minutos em 80% deles. Isso vale para chuva que já existe e está andando, como frentes e linhas de chuva. **Ela não prevê chuva que ainda vai se formar**: muitas pancadas de verão nascem no lugar em poucos minutos, sem aparecer antes no radar. Use como aviso, não como garantia.
+
+Logo depois de o HA iniciar, ou quando a chuva acabou de aparecer no radar, o sensor fica *desconhecido* até haver duas imagens com chuva (uns 5 a 10 minutos).
 
 Para pessoas, o nome não leva o tipo: `person.joao` vira `binary_sensor.cgesp_chovendo_joao`. Os sensores são recalculados quando a pessoa se move e a cada imagem nova do radar.
 
@@ -264,7 +277,7 @@ Algumas observações:
 
 O arquivo [`exemplos/painel_cgesp.yaml`](https://github.com/luyzfernando08/ha-cgesp/blob/develop/exemplos/painel_cgesp.yaml) é um painel completo, só com cartões nativos do Home Assistant (nada para instalar). Ele tem:
 
-- **Agora em casa:** se está chovendo, a intensidade, a chuva mais próxima, um aviso de chuva forte chegando e as regiões fora de Observação;
+- **Agora em casa:** se está chovendo, a intensidade, a chuva mais próxima, em quantos minutos ela chega, um aviso de chuva forte e as regiões fora de Observação;
 - **Radar de chuva:** a animação da última hora, o mapa de alertas e o radar atual;
 - **Alagamentos:** quantos há em cada zona e a lista dos pontos ativos, com rua, bairro, horário e se dá para passar;
 - **Estado de alerta:** todas as estações que você adicionou, sem precisar editar nada;
@@ -347,6 +360,32 @@ automation:
           message: >
             Chuva {{ state_attr('binary_sensor.cgesp_chovendo_zone_home', 'intensidade') }}.
             Recolha a roupa do varal.
+```
+
+### Chuva chegando em casa
+
+Avisa quando a chuva deve chegar em menos de 15 minutos:
+
+```yaml
+automation:
+  - alias: Chuva chegando
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.cgesp_chuva_chega_em_zone_home
+        below: 15
+    condition:
+      # Não avisa se já está chovendo (0 minutos).
+      - condition: numeric_state
+        entity_id: sensor.cgesp_chuva_chega_em_zone_home
+        above: 0
+    action:
+      - service: notify.mobile_app_seu_celular
+        data:
+          title: Chuva chegando
+          message: >
+            Chuva {{ state_attr('sensor.cgesp_chuva_chega_em_zone_home', 'intensidade_maxima') }}
+            em uns {{ states('sensor.cgesp_chuva_chega_em_zone_home') }} minutos,
+            vindo de {{ state_attr('sensor.cgesp_chuva_chega_em_zone_home', 'vindo_de') }}.
 ```
 
 ### Chuva forte chegando

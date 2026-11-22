@@ -36,6 +36,19 @@ def _resumo_radar(hass: HomeAssistant) -> dict[str, Any] | None:
         "imagem_bytes": len(leitura.imagem) if leitura else None,
         "celulas_com_chuva": sum(1 for n in leitura.celulas if n) if leitura else None,
         "quadros_animacao": len(radar.animacao),
+        "horario_do_radar": leitura.horario.isoformat() if leitura and leitura.horario else None,
+        "movimento": (
+            {
+                "vx_celulas_min": round(leitura.movimento.vx, 3),
+                "vy_celulas_min": round(leitura.movimento.vy, 3),
+                "velocidade_kmh": round(leitura.movimento.velocidade_kmh, 1),
+                "indo_para": leitura.movimento.indo_para,
+                "confianca": leitura.movimento.confianca,
+                "intervalo_min": leitura.movimento.minutos,
+            }
+            if leitura and leitura.movimento
+            else None
+        ),
     }
 
 

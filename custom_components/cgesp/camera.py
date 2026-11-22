@@ -54,9 +54,14 @@ class CgeRadarCamera(_CgeRadarCameraBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        leitura = self.leitura
+        movimento = leitura.movimento
         return {
-            "atualizado_em": dt_util.as_local(self.leitura.obtida_em),
-            "area_com_chuva_pct": round(self.leitura.area_com_chuva() * 100, 2),
+            "atualizado_em": dt_util.as_local(leitura.obtida_em),
+            "horario_do_radar": dt_util.as_local(leitura.horario) if leitura.horario else None,
+            "area_com_chuva_pct": round(leitura.area_com_chuva() * 100, 2),
+            "chuva_indo_para": movimento.indo_para if movimento else None,
+            "chuva_velocidade_kmh": round(movimento.velocidade_kmh) if movimento else None,
         }
 
     async def async_camera_image(

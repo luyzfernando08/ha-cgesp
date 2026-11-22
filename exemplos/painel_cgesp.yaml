@@ -64,6 +64,12 @@ views:
 
               Nenhuma chuva na região agora.
               {% endif %}
+              {% set chega = 'sensor.cgesp_chuva_chega_em_zone_home' %}
+              {% set minutos = states(chega) %}
+              {% if agora == 'sem_chuva' and minutos not in ['unavailable', 'unknown'] %}
+
+              ⏱️ **Chuva {{ nomes.get(state_attr(chega, 'intensidade_maxima'), '') }} deve chegar em uns {{ minutos | int }} min**{% if state_attr(chega, 'vindo_de') %}, vindo de {{ state_attr(chega, 'vindo_de') }}{% endif %}.
+              {% endif %}
               {% set forte = state_attr(proxima, 'chuva_forte_km') %}
               {% if forte is not none and agora not in ['forte', 'muito_forte'] %}
 
@@ -101,6 +107,18 @@ views:
             state_content:
               - state
               - direcao
+            grid_options:
+              columns: 6
+          - type: tile
+            entity: sensor.cgesp_chuva_chega_em_zone_home
+            name: Chega em
+            icon: mdi:timer-sand
+            color: deep-purple
+            state_content:
+              - state
+              - vindo_de
+            grid_options:
+              columns: 6
 
       # ------------------------------------------------------------ Radar
       - type: grid
@@ -298,6 +316,8 @@ views:
                 name: Chuva em casa
               - entity: sensor.cgesp_chuva_zone_home
                 name: Intensidade em casa
+              - entity: sensor.cgesp_chuva_chega_em_zone_home
+                name: Chuva chega em
           - type: statistics-graph
             title: Alagamentos por zona (máximo do dia)
             chart_type: bar

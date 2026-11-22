@@ -215,6 +215,86 @@ async def test_tirar_das_opcoes_apaga_os_sensores(hass: HomeAssistant, site_cge)
         assert hass.states.get(entity_id) is None, entity_id
 
 
+# ------------------------------------------------------------------ chuva chegando
+
+GRAJAU = (-23.78, -46.67)  # chuva moderada chegando em ~22 min em radar_movimento
+CHEGA_CASA = "sensor.cgesp_chuva_chega_em_zone_home"
+
+
+async def _chuva_de_22_11(hass: HomeAssistant, site_cge, nome: str, publicada: str) -> None:
+    """Imagens reais de 22/11: chuva forte no extremo sul indo para leste a
+    ~32 km/h. Títulos de 17:20 e 17:30 (hora de Brasília)."""
+    site_cge.trocar(URL_RADAR, site_cge.fixture(nome), publicada)
+    await _radar(hass).async_refresh()
+    await hass.async_block_till_done()
+
+
+async def test_chuva_chegando(hass: HomeAssistant, site_cge, freezer) -> None:
+    freezer.move_to("2026-11-22T20:32:00+00:00")
+    _casa(hass, GRAJAU)
+    site_cge.paginas[URL_RADAR] = site_cge.fixture("radar_movimento_1720.jpg")
+    site_cge.modificado[URL_RADAR] = "Sun, 22 Nov 2026 20:31:47 GMT"
+    await _configurar(hass)
+
+    # Uma imagem só: ainda não dá para saber para onde a chuva vai.
+    chega = hass.states.get(CHEGA_CASA)
+    assert chega.state == STATE_UNKNOWN
+    assert "ainda não medido" in chega.attributes["motivo"]
+
+    # Dez minutos depois (pelo título; o servidor publicou só 6 depois).
+    freezer.move_to("2026-11-22T20:38:00+00:00")
+    await _chuva_de_22_11(hass, site_cge, "radar_movimento_1730.jpg", "Sun, 22 Nov 2026 20:37:19 GMT")
+
+    # Pela imagem das 20:30 UTC, a chuva chega ~22 min depois dela; a
+    # imagem já tem 8 minutos, então faltam ~14.
+    chega = hass.states.get(CHEGA_CASA)
+    assert float(chega.state) == pytest.approx(14, abs=3)
+    assert chega.attributes["chega_as"] == pytest.approx(
+        datetime(2026, 11, 22, 20, 52, tzinfo=UTC), abs=timedelta(minutes=3)
+    )
+    assert chega.attributes["unit_of_measurement"] == "min"
+    assert chega.attributes["device_class"] == "duration"
+    assert chega.attributes["intensidade_maxima"] == "moderada"
+    assert chega.attributes["vindo_de"] == "oeste"
+    assert chega.attributes["velocidade_kmh"] == pytest.approx(32, abs=4)
+    assert "motivo" not in chega.attributes
+
+    radar = hass.states.get("camera.cgesp_radar")
+    assert radar.attributes["chuva_indo_para"] == "leste"
+    assert radar.attributes["horario_do_radar"] == datetime(2026, 11, 22, 20, 30, tzinfo=UTC)
+
+
+async def test_chuva_que_nao_vem(hass: HomeAssistant, site_cge, freezer) -> None:
+    freezer.move_to("2026-11-22T20:38:00+00:00")
+    _casa(hass, PAULISTA)
+    site_cge.paginas[URL_RADAR] = site_cge.fixture("radar_movimento_1720.jpg")
+    site_cge.modificado[URL_RADAR] = "Sun, 22 Nov 2026 20:31:47 GMT"
+    await _configurar(hass)
+    await _chuva_de_22_11(hass, site_cge, "radar_movimento_1730.jpg", "Sun, 22 Nov 2026 20:37:19 GMT")
+
+    # A chuva passa bem ao sul da Paulista.
+    chega = hass.states.get(CHEGA_CASA)
+    assert chega.state == STATE_UNKNOWN
+    assert chega.attributes["motivo"] == "nenhuma chuva chegando nos próximos 60 minutos"
+    assert chega.attributes["vindo_de"] == "oeste"
+
+
+async def test_imagem_republicada_mantem_o_movimento(
+    hass: HomeAssistant, site_cge, freezer
+) -> None:
+    freezer.move_to("2026-11-22T20:38:00+00:00")
+    _casa(hass, GRAJAU)
+    site_cge.paginas[URL_RADAR] = site_cge.fixture("radar_movimento_1720.jpg")
+    site_cge.modificado[URL_RADAR] = "Sun, 22 Nov 2026 20:31:47 GMT"
+    await _configurar(hass)
+    await _chuva_de_22_11(hass, site_cge, "radar_movimento_1730.jpg", "Sun, 22 Nov 2026 20:37:19 GMT")
+
+    # O servidor publica a mesma imagem de novo, com outro Last-Modified.
+    await _chuva_de_22_11(hass, site_cge, "radar_movimento_1730.jpg", "Sun, 22 Nov 2026 20:39:16 GMT")
+
+    assert float(hass.states.get(CHEGA_CASA).state) == pytest.approx(14, abs=3)
+
+
 # ------------------------------------------------------------------ câmeras
 
 

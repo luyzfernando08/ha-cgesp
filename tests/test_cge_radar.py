@@ -7,7 +7,7 @@ Fixtures (imagem real do CGE de 19/11/2026, 14:45):
   moderada na Av. Paulista, forte em Itaim Paulista e muito forte no Campo Limpo.
 """
 import io
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from PIL import Image
@@ -22,7 +22,10 @@ from custom_components.cgesp.cge_radar import (
     LeituraRadar,
     RadarImagemInvalida,
     RadarLayoutError,
+    horario_do_radar,
+    ler_hora_do_titulo,
     ler_radar,
+    medir_movimento,
 )
 
 from .conftest import SiteCge
@@ -127,7 +130,7 @@ def test_direcoes(chuva: LeituraRadar) -> None:
 
 def _jpeg(imagem: Image.Image) -> bytes:
     saida = io.BytesIO()
-    imagem.save(saida, format="JPEG")
+    imagem.save(saida, format="JPEG", quality=95)
     return saida.getvalue()
 
 
@@ -213,3 +216,149 @@ def test_animacao_ignora_leitura_antiga() -> None:
     animacao.adicionar(_ler("radar_fraca.jpg", HORARIO - timedelta(minutes=5)))
 
     assert animacao.horarios == [HORARIO]
+
+
+# ------------------------------------------------------------------ hora do radar
+
+
+def _imagem(nome: str) -> Image.Image:
+    return Image.open(io.BytesIO(SiteCge.fixture(nome)))
+
+
+def test_hora_do_titulo() -> None:
+    # "Atualizado em: 19-11-2026 14:45 Local"
+    assert ler_hora_do_titulo(_imagem("radar_sem_chuva.jpg")) == (14, 45)
+
+
+def test_titulo_ilegivel() -> None:
+    imagem = _imagem("radar_sem_chuva.jpg").convert("RGB")
+    imagem.paste((255, 255, 255), (0, 0, 700, 45))
+    assert ler_hora_do_titulo(imagem) is None
+
+
+def test_horario_do_radar() -> None:
+    publicada = datetime(2026, 11, 19, 18, 0, tzinfo=UTC)  # 15:00 em São Paulo
+    assert horario_do_radar((14, 45), publicada) == datetime(2026, 11, 19, 17, 45, tzinfo=UTC)
+    # Publicada logo depois da meia-noite com o título da véspera.
+    meia_noite = datetime(2026, 11, 20, 3, 5, tzinfo=UTC)  # 00:05 em São Paulo
+    assert horario_do_radar((23, 55), meia_noite) == datetime(2026, 11, 20, 2, 55, tzinfo=UTC)
+    # Título de horas antes da publicação: não dá para confiar.
+    assert horario_do_radar((9, 0), publicada) is None
+    assert horario_do_radar(None, publicada) is None
+
+
+def test_leitura_tem_a_hora_do_radar() -> None:
+    leitura = _ler("radar_chuva.jpg", datetime(2026, 11, 19, 18, 0, tzinfo=UTC))
+    assert leitura.horario == datetime(2026, 11, 19, 17, 45, tzinfo=UTC)
+
+
+# ------------------------------------------------------------------ movimento
+
+INICIO = datetime(2026, 11, 19, 17, 45, tzinfo=UTC)
+BLOCO = (-23.62, -46.70)  # chuva moderada pintada aqui, em 48 x 48 pixels
+ANDOU_PX = 24  # 6 células para leste em 10 minutos
+
+
+def _pixel(latitude: float, longitude: float) -> tuple[int, int]:
+    return round(118.58 + (longitude + 46.8) * 1176.5), round(139.31 + (-23.4 - latitude) * 1284.5)
+
+
+def _com_bloco(deslocamento_px: int, horario: datetime) -> LeituraRadar:
+    imagem = _imagem("radar_sem_chuva.jpg").convert("RGB")
+    x, y = _pixel(*BLOCO)
+    x += deslocamento_px
+    imagem.paste((252, 212, 63), (x - 24, y - 24, x + 24, y + 24))
+    leitura = ler_radar(_jpeg(imagem), horario)
+    leitura.horario = horario
+    return leitura
+
+
+@pytest.fixture(scope="module")
+def bloco_andando() -> LeituraRadar:
+    antes = _com_bloco(0, INICIO)
+    depois = _com_bloco(ANDOU_PX, INICIO + timedelta(minutes=10))
+    depois.movimento = medir_movimento(antes, depois)
+    return depois
+
+
+def test_movimento(bloco_andando: LeituraRadar) -> None:
+    movimento = bloco_andando.movimento
+
+    assert movimento.vx == pytest.approx(0.6, abs=0.05)  # células por minuto
+    assert movimento.vy == pytest.approx(0, abs=0.05)
+    assert movimento.velocidade_kmh == pytest.approx(12.5, abs=1)
+    assert movimento.indo_para == "leste"
+    assert movimento.vindo_de == "oeste"
+    assert movimento.confianca > 0.9
+    assert movimento.minutos == 10
+
+
+def _a_leste_do_bloco(px_da_borda: int) -> tuple[float, float]:
+    """Ponto `px_da_borda` pixels a leste da borda do bloco (já deslocado)."""
+    x, y = _pixel(*BLOCO)
+    x += ANDOU_PX + 24 + px_da_borda
+    return -23.4 - (y - 139.31) / 1284.5, -46.8 + (x - 118.58) / 1176.5
+
+
+def test_chuva_chegando(bloco_andando: LeituraRadar) -> None:
+    # 40 pixels = 10 células a 0,6 célula por minuto: uns 17 minutos.
+    chegada = bloco_andando.chegada_da_chuva(*_a_leste_do_bloco(40))
+
+    assert chegada.minutos == pytest.approx(17, abs=2)
+    assert chegada.intensidade_maxima == "moderada"
+    assert chegada.movimento.vindo_de == "oeste"
+
+
+def test_chegada_conta_a_partir_de_agora(bloco_andando: LeituraRadar) -> None:
+    # A imagem é de 10 minutos atrás (o servidor demora para publicar): a
+    # chuva que chegaria 17 minutos depois da imagem chega em 7 a partir de agora.
+    ponto = _a_leste_do_bloco(40)
+    pela_imagem = bloco_andando.chegada_da_chuva(*ponto)
+    agora = bloco_andando.horario + timedelta(minutes=10)
+
+    chegada = bloco_andando.chegada_da_chuva(*ponto, agora=agora)
+
+    assert chegada.minutos == pela_imagem.minutos - 10
+    assert chegada.chega_as == pela_imagem.chega_as == bloco_andando.horario + timedelta(
+        minutes=pela_imagem.minutos
+    )
+    # Passou da hora prevista: pela previsão, já está chovendo lá.
+    passou = bloco_andando.chegada_da_chuva(*ponto, agora=agora + timedelta(minutes=8))
+    assert passou.minutos == 0
+
+
+def test_chuva_no_ponto_chega_em_zero(bloco_andando: LeituraRadar) -> None:
+    assert bloco_andando.chegada_da_chuva(BLOCO[0], BLOCO[1] + ANDOU_PX / 1176.5).minutos == 0
+
+
+def test_chuva_indo_embora_ou_longe_demais(bloco_andando: LeituraRadar) -> None:
+    # A oeste do bloco: a chuva está se afastando.
+    assert bloco_andando.chegada_da_chuva(BLOCO[0], BLOCO[1] - 0.05) is None
+    # A leste, mas longe demais para chegar em 60 minutos (a 12,5 km/h).
+    assert bloco_andando.chegada_da_chuva(*_a_leste_do_bloco(400)) is None
+    # Ao norte: a chuva passa ao lado.
+    assert bloco_andando.chegada_da_chuva(BLOCO[0] + 0.05, BLOCO[1] + 0.05) is None
+
+
+def test_sem_movimento_medido() -> None:
+    leitura = _com_bloco(0, INICIO)
+    assert leitura.movimento is None
+    assert leitura.chegada_da_chuva(*_a_leste_do_bloco(40)) is None
+
+
+def test_movimento_precisa_de_intervalo_valido() -> None:
+    antes = _com_bloco(0, INICIO)
+    # Mesma hora (imagem republicada) ou muito tempo depois: não mede.
+    assert medir_movimento(antes, _com_bloco(ANDOU_PX, INICIO)) is None
+    assert medir_movimento(antes, _com_bloco(ANDOU_PX, INICIO + timedelta(minutes=40))) is None
+    # Sem a hora do título: não mede.
+    sem_hora = _com_bloco(ANDOU_PX, INICIO + timedelta(minutes=10))
+    sem_hora.horario = None
+    assert medir_movimento(antes, sem_hora) is None
+
+
+def test_sem_chuva_nao_mede() -> None:
+    seco = _ler("radar_sem_chuva.jpg", INICIO)
+    seco.horario = INICIO
+    depois = _com_bloco(0, INICIO + timedelta(minutes=10))
+    assert medir_movimento(seco, depois) is None

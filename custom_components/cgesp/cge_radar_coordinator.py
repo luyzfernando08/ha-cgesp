@@ -12,6 +12,7 @@ TOLERANCIA_FALHAS e a integração tenta de novo em INTERVALO_NOVA_TENTATIVA.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 
@@ -27,12 +28,15 @@ from .cge_alertas import REQUEST_TIMEOUT
 from .cge_alertas_coordinator import URL_ISSUES, CgeAlertasCoordinator, kwargs_config_entry
 from .cge_extras import INTERVALO_COM_CHUVA
 from .cge_radar import (
+    INTERVALO_MOVIMENTO,
+    INTERVALO_MOVIMENTO_IDEAL,
     URL_RADAR,
     AnimacaoRadar,
     LeituraRadar,
     RadarImagemInvalida,
     RadarLayoutError,
     ler_radar,
+    medir_movimento,
 )
 from .const import DOMAIN, INTERVALO_RADAR, INTERVALO_RADAR_SEM_CHUVA
 
@@ -67,6 +71,8 @@ class CgeRadarCoordinator(DataUpdateCoordinator[LeituraRadar]):
         self.falhando_desde: datetime | None = None
         self.falhas_seguidas = 0
         self.ultima_falha: str | None = None
+        # Leituras recentes (sem a imagem) para medir o movimento da chuva.
+        self._historico: list[LeituraRadar] = []
         super().__init__(
             hass,
             _LOGGER,
@@ -90,7 +96,39 @@ class CgeRadarCoordinator(DataUpdateCoordinator[LeituraRadar]):
         leitura = ler_radar(conteudo, obtida_em)
         self.animacao.adicionar(leitura)
         leitura.quadro = None  # já está na animação; não precisa ficar na memória
+        self._medir_movimento(leitura)
         return leitura
+
+    def _medir_movimento(self, leitura: LeituraRadar) -> None:
+        """Compara com a leitura de uns 10 minutos antes (pela hora do radar,
+        não pela de publicação)."""
+        if leitura.horario is None:
+            return
+        anteriores = [
+            antiga
+            for antiga in self._historico
+            if antiga.horario is not None
+            and INTERVALO_MOVIMENTO[0] <= leitura.horario - antiga.horario <= INTERVALO_MOVIMENTO[1]
+        ]
+        if anteriores:
+            referencia = min(
+                anteriores,
+                key=lambda antiga: abs(
+                    leitura.horario - antiga.horario - INTERVALO_MOVIMENTO_IDEAL  # type: ignore[operator]
+                ),
+            )
+            leitura.movimento = medir_movimento(referencia, leitura)
+        elif self.data is not None and self.data.horario == leitura.horario:
+            # A mesma imagem publicada de novo: o movimento continua valendo.
+            leitura.movimento = self.data.movimento
+        # Guarda só a grade (sem o JPEG) das leituras dos últimos 20 minutos.
+        limite = leitura.horario - INTERVALO_MOVIMENTO[1]
+        self._historico = [
+            antiga
+            for antiga in self._historico
+            if antiga.horario is not None and limite <= antiga.horario < leitura.horario
+        ]
+        self._historico.append(replace(leitura, imagem=b"", quadro=None, movimento=None))
 
     async def _async_update_data(self) -> LeituraRadar:
         try:
