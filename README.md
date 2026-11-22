@@ -13,6 +13,7 @@ Traz para o Home Assistant os dados do [CGE](https://www.cgesp.org/v3/), o Centr
 - **Contadores:** alagamentos ativos na cidade e em cada zona, e quantos houve no dia. Eles entram nas estatísticas do HA, então dá para fazer gráficos.
 - **Boletim do CGE:** o texto mais recente publicado pelo CGE, com a tendência para os próximos dias.
 - **Radar e mapa de alertas:** câmeras para colocar no painel com a chuva no radar (a imagem atual e uma animação da última hora) e o mapa de alertas do CGE.
+- **Painel pronto:** um [painel de exemplo](#painel-pronto) com tudo isso, para colar no Home Assistant.
 - **Eventos:** `cgesp_alagamento_novo` e `cgesp_alagamento_encerrado`, para automações que reagem a cada ponto.
 
 Os alertas são atualizados a cada 10 minutos quando pode chover e a cada 30 minutos quando não há chuva prevista (veja [Frequência de atualização](#frequência-de-atualização)).
@@ -258,6 +259,30 @@ Algumas observações:
 - O raio é contado em linha reta, não pelo caminho de carro.
 - A posição do alagamento é aproximada (veja a precisão em [Alagamentos no mapa](#alagamentos-no-mapa)). Em avenidas longas, um raio pequeno pode deixar alagamentos de fora. Comece com 2 ou 3 km.
 - O raio vale para todas as entidades escolhidas.
+
+## Painel pronto
+
+O arquivo [`exemplos/painel_cgesp.yaml`](https://github.com/luyzfernando08/ha-cgesp/blob/develop/exemplos/painel_cgesp.yaml) é um painel completo, só com cartões nativos do Home Assistant (nada para instalar). Ele tem:
+
+- **Agora em casa:** se está chovendo, a intensidade, a chuva mais próxima, um aviso de chuva forte chegando e as regiões fora de Observação;
+- **Radar de chuva:** a animação da última hora, o mapa de alertas e o radar atual;
+- **Alagamentos:** quantos há em cada zona e a lista dos pontos ativos, com rua, bairro, horário e se dá para passar;
+- **Estado de alerta:** todas as estações que você adicionou, sem precisar editar nada;
+- **Boletim do CGE**, **mapa** com os pontos de alagamento e **histórico** da chuva em casa e dos alagamentos por zona.
+
+<p>
+  <img src="https://raw.githubusercontent.com/luyzfernando08/ha-cgesp/develop/docs/painel-topo.png" alt="Painel: chuva em casa, radar e mapa de alertas" width="32%">
+  <img src="https://raw.githubusercontent.com/luyzfernando08/ha-cgesp/develop/docs/painel-alagamentos.png" alt="Painel: alagamentos por zona e boletim" width="32%">
+  <img src="https://raw.githubusercontent.com/luyzfernando08/ha-cgesp/develop/docs/painel-historico.png" alt="Painel: histórico da chuva e dos alagamentos" width="32%">
+</p>
+
+Para usar:
+
+1. Em **Alertas da cidade → Configurar → Acompanhar chuva e alagamentos em**, inclua `zone.home`. Sem isso, a parte "Agora em casa" fica vazia.
+2. Para ver os pontos no mapa, ligue também **Mostrar os pontos de alagamento no mapa**.
+3. Em **Configurações → Painéis → Adicionar painel → Novo painel do zero**, abra o painel novo, clique no lápis, depois em **⋮ → Editor de configuração bruta**, e cole o conteúdo do arquivo.
+
+Para ver o clima de uma estação no painel, adicione um cartão **Previsão do tempo** com a entidade `weather` dela.
 
 ## Exemplos de automação
 

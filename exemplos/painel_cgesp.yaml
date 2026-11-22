@@ -1,0 +1,318 @@
+# Painel CGE - SP: chuva em casa, radar, alagamentos, estado de alerta e
+# boletim. Só cartões nativos do Home Assistant, sem nada para instalar.
+#
+# Como usar: Configurações → Painéis → Adicionar painel → "Novo painel do
+# zero" → abra o painel → ✏️ → ⋮ → "Editor de configuração bruta" → cole
+# tudo isto no lugar do conteúdo.
+#
+# Precisa de zone.home em Alertas da cidade → Configurar → "Acompanhar
+# chuva e alagamentos em".
+
+title: CGE - SP
+views:
+  - title: Chuva e alagamentos
+    path: cgesp
+    icon: mdi:weather-pouring
+    type: sections
+    max_columns: 4
+    badges:
+      - type: entity
+        entity: binary_sensor.cgesp_chovendo_zone_home
+        name: Chuva em casa
+        show_name: true
+        color: blue
+      - type: entity
+        entity: sensor.cgesp_alagamentos_ativos
+        name: Alagamentos
+        show_name: true
+        icon: mdi:home-flood
+        color: red
+
+    sections:
+      # ------------------------------------------------------------ Agora em casa
+      - type: grid
+        cards:
+          - type: heading
+            heading: Agora em casa
+            icon: mdi:home-variant-outline
+
+          - type: markdown
+            content: |
+              {% set chuva = 'sensor.cgesp_chuva_zone_home' %}
+              {% set proxima = 'sensor.cgesp_chuva_mais_proxima_zone_home' %}
+              {% set nomes = {'sem_chuva': 'sem chuva', 'fraca': 'fraca',
+                'moderada': 'moderada', 'forte': 'forte', 'muito_forte': 'muito forte'} %}
+              {% set agora = states(chuva) %}
+              {% set km = states(proxima) %}
+              {% if agora in ['unavailable', 'unknown'] %}
+              ## 📡 Radar indisponível
+
+              {{ state_attr(chuva, 'motivo') or 'Sem leitura do radar no momento.' }}
+              {% elif agora != 'sem_chuva' %}
+              ## 🌧️ Chovendo em casa
+
+              Chuva **{{ nomes[agora] }}** agora.
+              {% elif km not in ['unavailable', 'unknown'] %}
+              ## 🌥️ Sem chuva em casa
+
+              {% set d = state_attr(proxima, 'direcao') %}
+              A chuva mais próxima ({{ nomes.get(state_attr(proxima, 'intensidade'), '') }})
+              está a **{{ '%.1f' | format(km | float) | replace('.', ',') }} km**,
+              {{ 'ao' if d in ['norte', 'sul'] else 'a' }} {{ d }}.
+              {% else %}
+              ## ☀️ Sem chuva no radar
+
+              Nenhuma chuva na região agora.
+              {% endif %}
+              {% set forte = state_attr(proxima, 'chuva_forte_km') %}
+              {% if forte is not none and agora not in ['forte', 'muito_forte'] %}
+
+              {% set d = state_attr(proxima, 'chuva_forte_direcao') %}
+              ⚠️ **Chuva forte a {{ '%.1f' | format(forte) | replace('.', ',') }} km**,
+              {{ 'ao' if d in ['norte', 'sul'] else 'a' }} {{ d }}.
+              {% endif %}
+              {% set fora = states.sensor
+                | selectattr('entity_id', 'search', '^sensor\.cgesp_.+_estado_alerta$')
+                | selectattr('state', 'in', ['atencao', 'iminencia_transbordamento', 'alerta'])
+                | list %}
+              {% if fora %}
+
+              🚨 **Fora de Observação:**
+              {% for s in fora %}{{ s.attributes.estacao }} ({{ {'atencao': 'atenção', 'iminencia_transbordamento': 'iminência de transbordamento', 'alerta': 'alerta'}[s.state] }}){{ ', ' if not loop.last }}{% endfor %}.
+              {% endif %}
+
+          - type: tile
+            entity: binary_sensor.cgesp_chovendo_zone_home
+            name: Chovendo
+            color: blue
+            grid_options:
+              columns: 6
+          - type: tile
+            entity: sensor.cgesp_chuva_zone_home
+            name: Intensidade
+            icon: mdi:weather-pouring
+            color: indigo
+            grid_options:
+              columns: 6
+          - type: tile
+            entity: sensor.cgesp_chuva_mais_proxima_zone_home
+            name: Chuva mais próxima
+            color: cyan
+            state_content:
+              - state
+              - direcao
+
+      # ------------------------------------------------------------ Radar
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Radar de chuva
+            icon: mdi:radar
+            badges:
+              - type: entity
+                entity: camera.cgesp_radar
+                show_state: false
+                show_icon: true
+                icon: mdi:clock-outline
+                state_content: atualizado_em
+          - type: picture-entity
+            entity: camera.cgesp_radar_animacao
+            name: Última hora
+            show_state: false
+            camera_view: auto
+            grid_options:
+              columns: 6
+          - type: picture-entity
+            entity: camera.cgesp_mapa_alertas
+            name: Situação das áreas monitoradas
+            show_state: false
+            camera_view: auto
+            grid_options:
+              columns: 6
+          - type: picture-entity
+            entity: camera.cgesp_radar
+            name: Radar agora
+            show_state: false
+            camera_view: auto
+            grid_options:
+              columns: full
+
+      # ------------------------------------------------------------ Alagamentos
+      - type: grid
+        cards:
+          - type: heading
+            heading: Alagamentos
+            icon: mdi:home-flood
+            badges:
+              - type: entity
+                entity: sensor.cgesp_alagamentos_ativos
+                name: Ativos
+                show_name: true
+                color: red
+              - type: entity
+                entity: sensor.cgesp_alagamentos_hoje
+                name: Hoje
+                show_name: true
+                icon: mdi:calendar-today
+          - type: tile
+            entity: binary_sensor.cgesp_alagamento_zona_norte
+            name: Norte
+            color: red
+            state_content: pontos_ativos
+            grid_options:
+              columns: 6
+          - type: tile
+            entity: binary_sensor.cgesp_alagamento_zona_sul
+            name: Sul
+            color: red
+            state_content: pontos_ativos
+            grid_options:
+              columns: 6
+          - type: tile
+            entity: binary_sensor.cgesp_alagamento_zona_leste
+            name: Leste
+            color: red
+            state_content: pontos_ativos
+            grid_options:
+              columns: 6
+          - type: tile
+            entity: binary_sensor.cgesp_alagamento_zona_oeste
+            name: Oeste
+            color: red
+            state_content: pontos_ativos
+            grid_options:
+              columns: 6
+          - type: tile
+            entity: binary_sensor.cgesp_alagamento_centro
+            name: Centro
+            color: red
+            state_content: pontos_ativos
+          - type: markdown
+            content: |
+              {% set zonas = ['zona_norte', 'zona_sul', 'zona_leste', 'zona_oeste', 'centro'] %}
+              {% set ns = namespace(total=0) %}
+              {% for z in zonas %}
+              {% set entidade = 'binary_sensor.cgesp_alagamento_' ~ z %}
+              {% set pontos = state_attr(entidade, 'pontos') or [] %}
+              {% if pontos %}
+              {% set ns.total = ns.total + pontos | length %}
+
+              **{{ state_attr(entidade, 'zona') }}**
+              {% for p in pontos %}
+              - {{ '🟡' if p.transitavel else '🔴' }} **{{ p.local }}**{% if p.referencia %}, {{ p.referencia }}{% endif %}
+                <br><small>{{ p.bairro }} · desde {{ p.inicio }}{% if p.sentido %} · sentido {{ p.sentido }}{% endif %} · {{ 'transitável' if p.transitavel else 'intransitável' }}</small>
+              {% endfor %}
+              {% endif %}
+              {% endfor %}
+              {% if ns.total == 0 %}
+              ✅ Nenhum alagamento ativo agora.
+              {% endif %}
+
+              <small>Dados de {{ state_attr('sensor.cgesp_alagamentos_ativos', 'data_referencia') }} · 🔴 intransitável · 🟡 transitável</small>
+
+      # ------------------------------------------------------------ Regiões
+      # Lista sozinha o estado de alerta de todas as estações que você
+      # adicionou. Para ver o clima de uma estação, adicione um cartão de
+      # previsão do tempo (weather-forecast) com a entidade weather dela.
+      - type: grid
+        cards:
+          - type: heading
+            heading: Estado de alerta
+            icon: mdi:shield-alert-outline
+          - type: markdown
+            content: |
+              {% set nomes = {
+                'observacao': '🟢 Observação',
+                'atencao': '🟡 Atenção',
+                'iminencia_transbordamento': '🟠 Iminência de transbordamento',
+                'alerta': '🔴 Alerta'} %}
+              {% set sensores = states.sensor
+                | selectattr('entity_id', 'search', '^sensor\.cgesp_.+_estado_alerta$')
+                | list %}
+              {% for s in sensores %}
+              - **{{ s.attributes.estacao }}**: {{ nomes.get(s.state, 'indisponível') }}
+                <br><small>{{ s.attributes.area_monitorada }} · {{ s.attributes.zona }}</small>
+              {% else %}
+              Adicione uma estação para ver o estado de alerta da região dela.
+              {% endfor %}
+
+      # ------------------------------------------------------------ Boletim
+      - type: grid
+        cards:
+          - type: heading
+            heading: Boletim do CGE
+            icon: mdi:newspaper-variant-outline
+          - type: markdown
+            content: |
+              {% set b = 'sensor.cgesp_boletim' %}
+              {% set quando = state_attr(b, 'publicado_em') %}
+              {% if states(b) in ['unavailable', 'unknown'] %}
+              Boletim indisponível no momento.
+              {% else %}
+              ### {{ states(b) }}
+
+              {% if quando %}<small>Publicado em {{ as_timestamp(quando) | timestamp_custom('%d/%m às %H:%M') }}</small>{% endif %}
+
+              <details><summary>Ler o boletim completo</summary>
+
+              {{ state_attr(b, 'texto') }}
+
+              </details>
+
+              [Abrir no site do CGE ↗]({{ state_attr(b, 'link') }})
+              {% endif %}
+
+      # ------------------------------------------------------------ Mapa
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Mapa
+            icon: mdi:map-outline
+          # Os pontos de alagamento só aparecem com "Mostrar os pontos de
+          # alagamento no mapa" ligada em Alertas da cidade → Configurar.
+          - type: map
+            entities:
+              - zone.home
+            geo_location_sources:
+              - cgesp
+            default_zoom: 11
+            theme_mode: auto
+            grid_options:
+              columns: full
+              rows: 6
+
+      # ------------------------------------------------------------ Histórico
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Histórico
+            icon: mdi:chart-timeline-variant
+          - type: history-graph
+            title: Chuva em casa (48 horas)
+            hours_to_show: 48
+            entities:
+              - entity: binary_sensor.cgesp_chovendo_zone_home
+                name: Chuva em casa
+              - entity: sensor.cgesp_chuva_zone_home
+                name: Intensidade em casa
+          - type: statistics-graph
+            title: Alagamentos por zona (máximo do dia)
+            chart_type: bar
+            period: day
+            days_to_show: 14
+            stat_types:
+              - max
+            entities:
+              - entity: sensor.cgesp_alagamentos_ativos_zona_norte
+                name: Norte
+              - entity: sensor.cgesp_alagamentos_ativos_zona_sul
+                name: Sul
+              - entity: sensor.cgesp_alagamentos_ativos_zona_leste
+                name: Leste
+              - entity: sensor.cgesp_alagamentos_ativos_zona_oeste
+                name: Oeste
+              - entity: sensor.cgesp_alagamentos_ativos_centro
+                name: Centro
