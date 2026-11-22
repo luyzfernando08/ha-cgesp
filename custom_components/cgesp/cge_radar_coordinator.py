@@ -4,11 +4,15 @@ Baixa a imagem do radar a cada 5 minutos e lê a chuva de cada célula. Quando
 não há chuva no radar nem na previsão, passa a 15 minutos (com a opção de
 intervalo adaptativo ligada). A consulta usa If-Modified-Since: se a imagem
 não mudou, o servidor responde sem reenviá-la.
+
+O servidor do radar às vezes responde 502/504 ou manda a imagem cortada. Uma
+falha assim não derruba os sensores: a última leitura continua valendo por até
+TOLERANCIA_FALHAS e a integração tenta de novo em INTERVALO_NOVA_TENTATIVA.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 import requests
@@ -22,12 +26,23 @@ from homeassistant.util import dt as dt_util
 from .cge_alertas import REQUEST_TIMEOUT
 from .cge_alertas_coordinator import URL_ISSUES, CgeAlertasCoordinator, kwargs_config_entry
 from .cge_extras import INTERVALO_COM_CHUVA
-from .cge_radar import URL_RADAR, AnimacaoRadar, LeituraRadar, RadarLayoutError, ler_radar
+from .cge_radar import (
+    URL_RADAR,
+    AnimacaoRadar,
+    LeituraRadar,
+    RadarImagemInvalida,
+    RadarLayoutError,
+    ler_radar,
+)
 from .const import DOMAIN, INTERVALO_RADAR, INTERVALO_RADAR_SEM_CHUVA
 
 _LOGGER = logging.getLogger(__name__)
 
 ISSUE_ID_RADAR = "layout_radar"
+
+# Por quanto tempo a última leitura continua valendo enquanto o servidor falha.
+TOLERANCIA_FALHAS = timedelta(minutes=20)
+INTERVALO_NOVA_TENTATIVA = timedelta(minutes=1)
 
 
 def _quando(resposta: requests.Response) -> datetime:
@@ -48,6 +63,10 @@ class CgeRadarCoordinator(DataUpdateCoordinator[LeituraRadar]):
         self.motivo_intervalo: str | None = None
         self.erro_layout: str | None = None
         self._ultima_modificacao: str | None = None
+        # Falhas passageiras seguidas (servidor fora, imagem cortada).
+        self.falhando_desde: datetime | None = None
+        self.falhas_seguidas = 0
+        self.ultima_falha: str | None = None
         super().__init__(
             hass,
             _LOGGER,
@@ -77,9 +96,9 @@ class CgeRadarCoordinator(DataUpdateCoordinator[LeituraRadar]):
         try:
             resposta = await self.hass.async_add_executor_job(self._baixar)
         except requests.exceptions.RequestException as err:
-            self._definir_intervalo(self.data)
-            raise UpdateFailed(f"não foi possível baixar o radar: {err}") from err
+            return self._falha_passageira(f"não foi possível baixar o radar: {err}", err)
         if resposta is None:
+            self._recuperou()
             self._definir_intervalo(self.data)
             return self.data  # type: ignore[return-value]
 
@@ -87,14 +106,48 @@ class CgeRadarCoordinator(DataUpdateCoordinator[LeituraRadar]):
             leitura = await self.hass.async_add_executor_job(
                 self._ler, resposta.content, _quando(resposta)
             )
+        except RadarImagemInvalida as err:
+            return self._falha_passageira(f"o radar mandou uma imagem inválida: {err}", err)
         except RadarLayoutError as err:
+            self._recuperou()
             self._sincronizar_reparo(str(err))
             self._definir_intervalo(None)
             raise UpdateFailed(f"imagem do radar não reconhecida: {err}") from err
+        self._recuperou()
         self._sincronizar_reparo(None)
         self._ultima_modificacao = resposta.headers.get("Last-Modified")
         self._definir_intervalo(leitura)
         return leitura
+
+    # ------------------------------------------------ falhas passageiras
+
+    def _falha_passageira(self, mensagem: str, erro: Exception) -> LeituraRadar:
+        """Mantém a última leitura e tenta de novo logo; só desiste (sensores
+        indisponíveis, erro no log) depois de TOLERANCIA_FALHAS."""
+        agora = dt_util.utcnow()
+        if self.falhando_desde is None:
+            self.falhando_desde = agora
+        self.falhas_seguidas += 1
+        self.ultima_falha = mensagem
+        if self.data is not None and agora - self.falhando_desde < TOLERANCIA_FALHAS:
+            _LOGGER.debug(
+                "CGE: %s (falha %d seguida); mantendo a imagem anterior",
+                mensagem,
+                self.falhas_seguidas,
+            )
+            self.update_interval = INTERVALO_NOVA_TENTATIVA
+            self.motivo_intervalo = "nova tentativa após falha do servidor"
+            return self.data
+        self._definir_intervalo(None)
+        raise UpdateFailed(mensagem) from erro
+
+    def _recuperou(self) -> None:
+        if self.falhas_seguidas:
+            _LOGGER.debug(
+                "CGE: radar voltou depois de %d falha(s) seguida(s)", self.falhas_seguidas
+            )
+        self.falhando_desde = None
+        self.falhas_seguidas = 0
 
     # ------------------------------------------------ intervalo
 

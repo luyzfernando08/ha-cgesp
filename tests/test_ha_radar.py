@@ -78,6 +78,13 @@ async def _nova_imagem(hass: HomeAssistant, site_cge, nome: str | None, minuto: 
     await hass.async_block_till_done()
 
 
+async def _nova_imagem_bruta(hass: HomeAssistant, site_cge, conteudo, minuto: int) -> None:
+    """Como _nova_imagem, mas com qualquer resposta (bytes ou código de erro)."""
+    site_cge.trocar(URL_RADAR, conteudo, f"Thu, 19 Nov 2026 18:{minuto:02d}:00 GMT")
+    await _radar(hass).async_refresh()
+    await hass.async_block_till_done()
+
+
 # ------------------------------------------------------------------ chuva no local
 
 
@@ -258,6 +265,60 @@ async def test_radar_fora_do_ar_nao_afeta_alertas(hass: HomeAssistant, site_cge)
     assert hass.states.get("camera.cgesp_radar").state == STATE_UNAVAILABLE
     assert hass.states.get(CHUVA_CASA).state == STATE_UNAVAILABLE
     assert hass.states.get("sensor.cgesp_alagamentos_ativos").state == "1"
+
+
+async def test_falha_passageira_mantem_a_ultima_leitura(
+    hass: HomeAssistant, site_cge, caplog
+) -> None:
+    _casa(hass, PAULISTA)
+    site_cge.paginas[URL_RADAR] = site_cge.fixture("radar_chuva.jpg")
+    await _configurar(hass)
+    radar = _radar(hass)
+    leitura = radar.data
+
+    # 502, 504 e imagem cortada: os sensores continuam com a imagem anterior,
+    # sem erro no log nem aviso em Reparos, e a próxima tentativa é logo.
+    inteira = site_cge.fixture("radar_chuva.jpg")
+    for minuto, conteudo in [(5, 502), (6, 504), (7, inteira[: len(inteira) // 2])]:
+        await _nova_imagem_bruta(hass, site_cge, conteudo, minuto)
+        assert radar.last_update_success
+        assert radar.data is leitura
+        assert hass.states.get(CHUVA_CASA).state == "moderada"
+        assert radar.update_interval == timedelta(minutes=1)
+    assert radar.falhas_seguidas == 3
+    assert not [
+        r for r in caplog.records
+        if r.name.startswith("custom_components") and r.levelname in ("ERROR", "WARNING")
+    ]
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "layout_radar") is None
+
+    # O servidor volta: leitura nova e intervalo normal.
+    await _nova_imagem(hass, site_cge, "radar_sem_chuva.jpg", 8)
+    assert hass.states.get(CHUVA_CASA).state == "sem_chuva"
+    assert radar.falhas_seguidas == 0
+    assert radar.update_interval == timedelta(minutes=5)
+
+
+async def test_falha_longa_deixa_os_sensores_indisponiveis(
+    hass: HomeAssistant, site_cge, freezer
+) -> None:
+    freezer.move_to("2026-11-19T18:00:00+00:00")
+    _casa(hass, PAULISTA)
+    await _configurar(hass)
+    radar = _radar(hass)
+
+    site_cge.paginas[URL_RADAR] = 502
+    await radar.async_refresh()
+    assert hass.states.get(CHUVA_CASA).state == "sem_chuva"
+
+    # Depois de 20 minutos falhando, a imagem antiga já não vale.
+    freezer.tick(timedelta(minutes=21))
+    await radar.async_refresh()
+    await hass.async_block_till_done()
+
+    assert not radar.last_update_success
+    assert hass.states.get(CHUVA_CASA).state == STATE_UNAVAILABLE
+    assert radar.update_interval == timedelta(minutes=5)
 
 
 async def test_layout_do_radar_mudou(hass: HomeAssistant, site_cge) -> None:

@@ -70,6 +70,11 @@ class RadarLayoutError(Exception):
     """A imagem do radar não tem mais o layout esperado."""
 
 
+class RadarImagemInvalida(Exception):
+    """O servidor mandou algo que não é uma imagem inteira (página de erro,
+    arquivo cortado no meio da transferência). Costuma ser passageiro."""
+
+
 @dataclass
 class ChuvaProxima:
     distancia_km: float
@@ -237,12 +242,15 @@ def _celulas(imagem: Image.Image) -> tuple[bytes, int, int]:
 
 
 def ler_radar(conteudo: bytes, obtida_em: datetime) -> LeituraRadar:
-    """Lê a imagem do radar. Levanta RadarLayoutError se o layout mudou."""
+    """Lê a imagem do radar. Levanta RadarImagemInvalida se o conteúdo não é
+    uma imagem inteira, e RadarLayoutError se o layout mudou."""
     try:
         imagem = Image.open(io.BytesIO(conteudo))
         imagem.load()
     except (OSError, ValueError) as err:
-        raise RadarLayoutError(f"imagem inválida: {err}") from err
+        raise RadarImagemInvalida(
+            f"{len(conteudo)} bytes que não formam uma imagem ({type(err).__name__})"
+        ) from err
     imagem = imagem.convert("RGB")
     _verificar_layout(imagem)
     celulas, colunas, linhas = _celulas(imagem)

@@ -73,7 +73,8 @@ class SiteCge:
     """Site do CGE simulado: cada URL devolve o conteúdo de uma fixture.
 
     `paginas[url]` pode ser trocado durante o teste: bytes viram resposta
-    200; None simula o site fora do ar (erro de conexão). Uma URL que não
+    200; None simula o site fora do ar (erro de conexão); um número é o código
+    de erro HTTP que o servidor devolve (502, 504...). Uma URL que não
     está em `paginas` falha o teste, para nenhuma consulta escapar.
 
     Com If-Modified-Since igual a `modificado[url]` (o Last-Modified da
@@ -81,7 +82,7 @@ class SiteCge:
     """
 
     def __init__(self) -> None:
-        self.paginas: dict[str, bytes | None] = {
+        self.paginas: dict[str, bytes | int | None] = {
             URL_ALAGAMENTOS: self.fixture("alagamentos.html"),
             URL_MAPA_AREAS: self.fixture("mapa_alertas.html"),
             URL_MAPA_PNG: self.fixture("mapa_alertas.png"),
@@ -97,7 +98,7 @@ class SiteCge:
     def fixture(nome: str) -> bytes:
         return (FIXTURES / nome).read_bytes()
 
-    def trocar(self, url: str, conteudo: bytes | None, modificado: str) -> None:
+    def trocar(self, url: str, conteudo: bytes | int | None, modificado: str) -> None:
         """Página nova, com outro Last-Modified."""
         self.paginas[url] = conteudo
         self.modificado[url] = modificado
@@ -119,6 +120,10 @@ class SiteCge:
         modificado = self.modificado.get(chave, MODIFICADO_EM)
         resposta = requests.Response()
         resposta.url = url
+        if isinstance(conteudo, int):
+            resposta.status_code = conteudo
+            resposta._content = b"<html>Bad Gateway</html>"
+            return resposta
         resposta.headers["Last-Modified"] = modificado
         if (headers or {}).get("If-Modified-Since") == modificado:
             resposta.status_code = 304

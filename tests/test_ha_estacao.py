@@ -41,7 +41,9 @@ async def _estacao(hass: HomeAssistant, estacao_id: int = PINHEIROS) -> MockConf
     return entrada
 
 
-async def test_clima_da_estacao(hass: HomeAssistant, site_cge) -> None:
+async def test_clima_da_estacao(hass: HomeAssistant, site_cge, freezer) -> None:
+    # A previsão do fixture é de 19/11; a condição de hoje sai dela.
+    freezer.move_to("2026-11-19T15:00:00+00:00")
     await _estacao(hass)
 
     clima = hass.states.get(CLIMA)
@@ -53,7 +55,9 @@ async def test_clima_da_estacao(hass: HomeAssistant, site_cge) -> None:
     assert clima.attributes["wind_speed"] == 20.3
 
 
-async def test_previsao_diaria(hass: HomeAssistant, site_cge) -> None:
+async def test_previsao_diaria(hass: HomeAssistant, site_cge, freezer) -> None:
+    # A previsão do fixture é de 19/11; a condição de hoje sai dela.
+    freezer.move_to("2026-11-19T15:00:00+00:00")
     await _estacao(hass)
 
     resposta = await hass.services.async_call(

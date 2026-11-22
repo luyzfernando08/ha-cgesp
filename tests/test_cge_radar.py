@@ -20,6 +20,7 @@ from custom_components.cgesp.cge_radar import (
     SEM_CHUVA,
     AnimacaoRadar,
     LeituraRadar,
+    RadarImagemInvalida,
     RadarLayoutError,
     ler_radar,
 )
@@ -151,8 +152,16 @@ def test_mapa_deslocado() -> None:
 
 
 def test_nao_e_imagem() -> None:
-    with pytest.raises(RadarLayoutError, match="inválida"):
+    # Página de erro no lugar da imagem: falha passageira, não layout novo.
+    with pytest.raises(RadarImagemInvalida, match="17 bytes"):
         ler_radar(b"<html>erro</html>", HORARIO)
+
+
+def test_imagem_cortada() -> None:
+    # Transferência interrompida no meio do arquivo.
+    inteira = SiteCge.fixture("radar_chuva.jpg")
+    with pytest.raises(RadarImagemInvalida):
+        ler_radar(inteira[: len(inteira) // 2], HORARIO)
 
 
 # ------------------------------------------------------------------ animação

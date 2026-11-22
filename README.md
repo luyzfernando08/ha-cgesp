@@ -458,6 +458,7 @@ A integração depende do site do CGE, que não tem uma API oficial. Por isso el
 
 - **Site fora do ar:** os sensores ficam *indisponíveis* e voltam sozinhos quando o site normalizar.
 - **Só uma parte falhou:** a página de alagamentos, o mapa e o radar são lidos separadamente. Se um deles falhar, os sensores dos outros continuam funcionando.
+- **Falhas rápidas do radar:** o servidor do radar às vezes responde com erro (502, 504) ou manda a imagem pela metade. Nesses casos, os sensores de chuva continuam com a última imagem boa e a integração tenta de novo a cada minuto, sem registrar erro no log. Se a falha durar mais de 20 minutos, eles ficam *indisponíveis*. O horário da imagem usada fica no atributo `radar_atualizado_em`.
 - **O CGE mudou a página:** se a integração não conseguir mais ler os alagamentos, os sensores de zona ficam *indisponíveis*. Eles não passam a dizer "sem alagamento". Também aparece um aviso em **Configurações → Reparos** explicando o que aconteceu. Esse aviso some sozinho quando a leitura volta a funcionar.
 
 Se o aviso de Reparos não sumir, veja se há uma versão nova no Marketplace (ou no HACS, em versões antigas do HA) ou [abra uma issue](https://github.com/luyzfernando08/ha-cgesp/issues). Ajuda muito anexar o diagnóstico: em **Configurações → Dispositivos e serviços → CGE - SP**, abra o menu (⋮) da entrada **Alertas da cidade** e clique em **Baixar diagnóstico**. O arquivo traz o que a integração leu do site na última atualização. A localização de pessoas e zonas não vai junto.
