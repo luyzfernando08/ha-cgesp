@@ -483,3 +483,47 @@ async def test_diagnostico(hass: HomeAssistant, site_cge, hass_client) -> None:
     assert radar["erro_layout"] is None
     assert radar["celulas_com_chuva"] > 0
     assert radar["quadros_animacao"] == 2
+
+
+# ------------------------------------------------------------------ camada do mapa
+
+
+async def test_camada_de_chuva_no_mapa(hass: HomeAssistant, site_cge, hass_client_no_auth) -> None:
+    from .test_cge_radar import bloco_e_pixel
+
+    site_cge.paginas[URL_RADAR] = site_cge.fixture("radar_chuva.jpg")
+    await _configurar(hass)
+    # Sem login: o card de mapa pede os blocos direto ao servidor.
+    cliente = await hass_client_no_auth()
+
+    x, y, px, py = bloco_e_pixel(*PAULISTA, zoom=13)
+    resposta = await cliente.get(f"/api/cgesp/radar/qualquer/13/{x}/{y}.png")
+    assert resposta.status == 200
+    assert resposta.content_type == "image/png"
+    assert "max-age" in resposta.headers["Cache-Control"]
+    imagem = Image.open(io.BytesIO(await resposta.read())).convert("RGBA")
+    assert imagem.getpixel((px, py)) == (252, 212, 63, 255)  # moderada
+
+    # De novo: vem do cache, igual.
+    segunda = await cliente.get(f"/api/cgesp/radar/outra/13/{x}/{y}.png")
+    assert await segunda.read() == await resposta.read()
+
+    # Fora da imagem: bloco transparente.
+    x, y, px, py = bloco_e_pixel(*CAMPINAS, zoom=13)
+    vazio = await cliente.get(f"/api/cgesp/radar/qualquer/13/{x}/{y}.png")
+    assert Image.open(io.BytesIO(await vazio.read())).convert("RGBA").getpixel((px, py))[3] == 0
+
+    # Endereços inválidos.
+    assert (await cliente.get("/api/cgesp/radar/v/13/99999/1.png")).status == 404
+    assert (await cliente.get("/api/cgesp/radar/v/25/1/1.png")).status == 404
+    assert (await cliente.get("/api/cgesp/radar/v/a/1/1.png")).status == 404
+
+
+async def test_horario_do_radar(hass: HomeAssistant, site_cge) -> None:
+    await _configurar(hass)
+
+    horario = hass.states.get("sensor.cgesp_radar_horario")
+    assert horario.attributes["device_class"] == "timestamp"
+    # A hora do título (14:45 em São Paulo), não a de publicação.
+    assert horario.state == "2026-11-19T17:45:00+00:00"
+    assert horario.attributes["publicado_em"] == datetime(2026, 11, 19, 18, 0, tzinfo=UTC)

@@ -7,12 +7,14 @@ Fixtures (imagem real do CGE de 19/11/2026, 14:45):
   moderada na Av. Paulista, forte em Itaim Paulista e muito forte no Campo Limpo.
 """
 import io
+import math
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from PIL import Image
 
 from custom_components.cgesp.cge_radar import (
+    BLOCO_VAZIO,
     FORTE,
     FRACA,
     MODERADA,
@@ -362,3 +364,67 @@ def test_sem_chuva_nao_mede() -> None:
     seco.horario = INICIO
     depois = _com_bloco(0, INICIO + timedelta(minutes=10))
     assert medir_movimento(seco, depois) is None
+
+
+# ------------------------------------------------------------------ blocos do mapa
+
+
+def bloco_e_pixel(latitude: float, longitude: float, zoom: int) -> tuple[int, int, int, int]:
+    """Bloco {x}/{y} dos mapas web que contém o ponto, e o pixel dentro dele."""
+    escala = 256 * 2**zoom
+    gx = (longitude + 180) / 360 * escala
+    seno = math.sin(math.radians(latitude))
+    gy = (0.5 - math.log((1 + seno) / (1 - seno)) / (4 * math.pi)) * escala
+    return int(gx // 256), int(gy // 256), int(gx % 256), int(gy % 256)
+
+
+def _cor(png: bytes, px: int, py: int) -> tuple[int, int, int, int]:
+    return Image.open(io.BytesIO(png)).convert("RGBA").getpixel((px, py))
+
+
+@pytest.mark.parametrize(
+    ("ponto", "cor"),
+    [
+        (PAULISTA, (252, 212, 63)),  # moderada
+        (ITAIM_PAULISTA, (251, 54, 20)),  # forte
+        (CAMPO_LIMPO, (182, 39, 245)),  # muito forte
+    ],
+)
+def test_bloco_com_chuva(chuva: LeituraRadar, ponto, cor) -> None:
+    x, y, px, py = bloco_e_pixel(*ponto, zoom=13)
+    png = chuva.bloco_do_mapa(13, x, y)
+
+    assert Image.open(io.BytesIO(png)).format == "PNG"
+    assert Image.open(io.BytesIO(png)).size == (256, 256)
+    assert _cor(png, px, py) == (*cor, 255)
+
+
+def test_bloco_transparente_fora_da_chuva(chuva: LeituraRadar) -> None:
+    # Consolação: no mesmo bloco da Paulista, mas sem chuva.
+    x, y, _, _ = bloco_e_pixel(*PAULISTA, zoom=13)
+    _, _, px, py = bloco_e_pixel(*CONSOLACAO, zoom=13)
+    assert bloco_e_pixel(*CONSOLACAO, zoom=13)[:2] == (x, y)
+    assert _cor(chuva.bloco_do_mapa(13, x, y), px, py)[3] == 0
+
+
+def test_bloco_vazio(chuva: LeituraRadar) -> None:
+    # Fora da imagem do radar, e dentro dela sem chuva.
+    assert chuva.bloco_do_mapa(13, *bloco_e_pixel(*CAMPINAS, zoom=13)[:2]) == BLOCO_VAZIO
+    seco = _ler("radar_sem_chuva.jpg")
+    assert seco.bloco_do_mapa(13, *bloco_e_pixel(*PAULISTA, zoom=13)[:2]) == BLOCO_VAZIO
+    assert _cor(BLOCO_VAZIO, 128, 128)[3] == 0
+
+
+def test_bloco_de_zoom_baixo_tem_a_cidade_toda(chuva: LeituraRadar) -> None:
+    # Zoom 8: a imagem inteira cabe em um bloco; a chuva continua no lugar.
+    for ponto, nivel in ((PAULISTA, MODERADA), (ITAIM_PAULISTA, FORTE)):
+        x, y, px, py = bloco_e_pixel(*ponto, zoom=8)
+        assert _cor(chuva.bloco_do_mapa(8, x, y), px, py)[3] == 255, nivel
+
+
+def test_legenda_nao_vira_chuva() -> None:
+    # A legenda (canto sudeste) tem as cores da chuva, mas não é radar.
+    leitura = _ler("radar_sem_chuva.jpg")
+    legenda = (-23.99, -46.40)
+    x, y, _, _ = bloco_e_pixel(*legenda, zoom=10)
+    assert leitura.bloco_do_mapa(10, x, y) == BLOCO_VAZIO

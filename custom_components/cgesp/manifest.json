@@ -8,12 +8,14 @@
     "@luyzfernando08"
   ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "http"
+  ],
   "documentation": "https://github.com/luyzfernando08/ha-cgesp",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/luyzfernando08/ha-cgesp/issues",
   "requirements": [
     "beautifulsoup4>=4.12.3"
   ],
-  "version": "2.3.0"
+  "version": "2.4.0"
 }

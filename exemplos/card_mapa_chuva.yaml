@@ -1,0 +1,42 @@
+# Mapa com a chuva do radar e os alagamentos ativos.
+#
+# Precisa do card ha-map-card, instalado pelo HACS:
+#   https://github.com/nathan-gs/ha-map-card
+#
+# Na integração (Alertas da cidade → Configurar):
+# - inclua as pessoas e zonas que quiser ver em "Acompanhar chuva e alagamentos em";
+# - ligue "Mostrar os pontos de alagamento no mapa" para ver os alagamentos.
+#
+# Para usar: no painel, adicione um cartão "Manual" e cole o conteúdo abaixo.
+# Troque ou acrescente as entidades em `entities` (person.*, zone.*, device_tracker.*).
+type: custom:map-card
+entities:
+  - zone.home
+  # - person.joao
+
+  # Alagamentos intransitáveis (azul forte) e transitáveis (azul-claro).
+  # Passe o mouse num ponto para ver rua, bairro, horário e referência.
+  - entity: sensor.cgesp_alagamentos_ativos
+    geojson:
+      attribute: geojson_intransitaveis
+      color: '#2962ff'
+      hide_marker: true
+  - entity: sensor.cgesp_alagamentos_ativos
+    geojson:
+      attribute: geojson_transitaveis
+      color: '#00e5ff'
+      hide_marker: true
+focus_entity: zone.home
+zoom: 11
+card_size: 8
+tile_layers:
+  # Chuva do radar. O horário do radar na URL faz o card buscar a camada de
+  # novo a cada imagem nova, sem recarregar a página.
+  - url: /api/cgesp/radar/{{states('sensor.cgesp_radar_horario')}}/{z}/{x}/{y}.png
+    options:
+      # Camada separada do mapa de fundo: no tema escuro, o card inverte as
+      # cores do fundo, e sem isso a chuva ficaria desbotada e com outras cores.
+      pane: overlayPane
+      opacity: 0.8
+      # O radar não tem mais detalhe que isso (uns 350 m por quadradinho).
+      maxNativeZoom: 13

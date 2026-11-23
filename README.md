@@ -12,7 +12,7 @@ Traz para o Home Assistant os dados do [CGE](https://www.cgesp.org/v3/), o Centr
 - **Alagamentos perto de quem você quiser:** um sensor por pessoa, rastreador ou zona, com quantos alagamentos estão a menos de X km. Ele acompanha a pessoa enquanto ela se move.
 - **Contadores:** alagamentos ativos na cidade e em cada zona, e quantos houve no dia. Eles entram nas estatísticas do HA, então dá para fazer gráficos.
 - **Boletim do CGE:** o texto mais recente publicado pelo CGE, com a tendência para os próximos dias.
-- **Radar e mapa de alertas:** câmeras para colocar no painel com a chuva no radar (a imagem atual e uma animação da última hora) e o mapa de alertas do CGE.
+- **Radar e mapa de alertas:** câmeras para colocar no painel com a chuva no radar (a imagem atual e uma animação da última hora) e o mapa de alertas do CGE. A chuva também pode aparecer [sobre um mapa de ruas](#chuva-no-mapa), como camada.
 - **Painel pronto:** um [painel de exemplo](#painel-pronto) com tudo isso, para colar no Home Assistant.
 - **Eventos:** `cgesp_alagamento_novo` e `cgesp_alagamento_encerrado`, para automações que reagem a cada ponto.
 
@@ -168,10 +168,50 @@ content: |
 | `camera.cgesp_radar` | Chuva estimada pelo radar sobre a cidade, com a intensidade (fraca, moderada, forte, muito forte) |
 | `camera.cgesp_radar_animacao` | Animação com as imagens do radar da última hora, para ver para onde a chuva está indo |
 | `camera.cgesp_mapa_alertas` | O mapa "Situação das Áreas Monitoradas" do CGE, com as regiões coloridas pelo estado |
+| `sensor.cgesp_radar_horario` | Hora da última imagem do radar (a do radar, não a de publicação). Muda a cada imagem nova |
 
 Para mostrar no painel, use um cartão de imagem de entidade (`picture-entity`) com a câmera. O mapa de alertas é o mesmo que a integração já baixa para ler o estado das regiões, então não gera consulta extra.
 
 A animação é montada com as imagens que a integração vai baixando: logo depois de o HA iniciar ela tem um quadro só e completa a hora com o tempo. Quando a chuva não muda de uma imagem para a outra, fica só a mais recente.
+
+### Chuva no mapa
+
+A integração também serve a chuva do radar como uma camada de mapa: só os quadradinhos de chuva, nas cores da legenda, com o resto transparente. Assim dá para ver a chuva sobre o mapa de ruas, junto com as pessoas e zonas.
+
+O mapa nativo do Home Assistant não aceita camadas. Use o [ha-map-card](https://github.com/nathan-gs/ha-map-card), instalado pelo HACS. O arquivo [`exemplos/card_mapa_chuva.yaml`](https://github.com/luyzfernando08/ha-cgesp/blob/develop/exemplos/card_mapa_chuva.yaml) tem o card pronto, com comentários; é só colar num cartão **Manual**:
+
+```yaml
+type: custom:map-card
+entities:
+  - zone.home
+  - person.joao
+  - entity: sensor.cgesp_alagamentos_ativos
+    geojson:
+      attribute: geojson_intransitaveis
+      color: '#2962ff'
+      hide_marker: true
+  - entity: sensor.cgesp_alagamentos_ativos
+    geojson:
+      attribute: geojson_transitaveis
+      color: '#00e5ff'
+      hide_marker: true
+focus_entity: zone.home
+zoom: 11
+tile_layers:
+  - url: /api/cgesp/radar/{{states('sensor.cgesp_radar_horario')}}/{z}/{x}/{y}.png
+    options:
+      pane: overlayPane
+      opacity: 0.8
+      maxNativeZoom: 13
+```
+
+- As duas entradas de `sensor.cgesp_alagamentos_ativos` mostram os alagamentos ativos como pontos no mapa: em azul forte os intransitáveis (atributo `geojson_intransitaveis`) e em azul-claro os transitáveis (`geojson_transitaveis`). Os tons de azul não se confundem com as cores da chuva; troque `color` se preferir outras. Passando o mouse, aparecem a rua, o bairro, o horário de início e se dá para passar. O ha-map-card não lê as entidades `geo_location` dos alagamentos, por isso o sensor traz os mesmos pontos nesses atributos. Precisa da opção [Mostrar os pontos de alagamento no mapa](#alagamentos-no-mapa) ligada; sem ela, os pontos não têm posição e a lista fica vazia.
+- `pane: overlayPane` põe a chuva numa camada separada do mapa de fundo. Sem isso, no tema escuro o card inverte e desbota as cores da chuva junto com as do mapa (o amarelo vira marrom e o vermelho vira rosa).
+- O pedaço com `sensor.cgesp_radar_horario` faz o card buscar a camada de novo a cada imagem do radar, sem recarregar a página.
+- `maxNativeZoom: 13` evita pedir blocos com mais detalhe do que o radar tem: cada quadradinho de chuva tem uns 350 m, e com zoom maior o mapa só amplia os blocos.
+- A camada cobre só a [área da imagem do radar](#área-coberta-pelo-radar). Fora dela, fica transparente.
+
+O endereço `/api/cgesp/radar/…` não pede login, porque o card busca os blocos direto do navegador, sem o login do HA. Ele só mostra o que a imagem pública do radar já mostra.
 
 ### Eventos
 
@@ -247,8 +287,27 @@ Para pessoas, o nome não leva o tipo: `person.joao` vira `binary_sensor.cgesp_c
 Algumas observações:
 
 - O radar mostra a chuva em blocos de cerca de 1 km, então "chovendo em casa" quer dizer "chovendo no quarteirão". A intensidade é a estimada pelo radar, não a medida por um pluviômetro.
-- A imagem cobre a capital e um pouco dos arredores. Fora dela (em Campinas, por exemplo), os sensores ficam *desconhecidos* e o atributo `motivo` explica por quê.
+- A imagem cobre a capital e um pouco dos arredores (veja [Área coberta pelo radar](#área-coberta-pelo-radar)). Fora dela (em Campinas, por exemplo), os sensores ficam *desconhecidos* e o atributo `motivo` explica por quê.
 - Se o CGE mudar o desenho da imagem do radar, os sensores ficam *indisponíveis* em vez de dizer "sem chuva", e aparece um aviso em Reparos.
+
+### Área coberta pelo radar
+
+**[Veja no mapa a área que a imagem do radar cobre](https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%22name%22%3A%22Radar%20SAISP%22%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Polygon%22%2C%22coordinates%22%3A%5B%5B%5B-46.86084%2C-23.33125%5D%2C%5B-46.86084%2C-24.03347%5D%2C%5B-46.47835%2C-24.03347%5D%2C%5B-46.47835%2C-23.93148%5D%2C%5B-46.32875%2C-23.93148%5D%2C%5B-46.32875%2C-23.33125%5D%2C%5B-46.86084%2C-23.33125%5D%5D%5D%7D%7D)**
+
+A imagem é um retângulo de cerca de 54 x 78 km, que vai de Cajamar e Mairiporã, ao norte, até a Serra do Mar, ao sul, e de Barueri e Cotia, a oeste, até Suzano, a leste:
+
+| Borda | Latitude / longitude |
+|---|---|
+| Norte | -23,33125 |
+| Sul | -24,03347 |
+| Oeste | -46,86084 |
+| Leste | -46,32875 |
+
+O canto sudeste (a leste de -46,47835 e ao sul de -23,93148) é ocupado pela legenda da imagem e não tem chuva.
+
+**Perto da borda, o aviso chega mais tarde.** A integração só enxerga a chuva que já está dentro da imagem. Se você mora perto de uma borda e a chuva vem justamente desse lado, ela só aparece quando entra na imagem, e sobra pouco tempo até chegar em você. A conta é a distância até a borda dividida pela velocidade da chuva: a 5 km da borda, com a chuva a 30 km/h, o aviso vem no máximo uns 10 minutos antes. Pelo mesmo motivo, a chuva mais próxima (`sensor.cgesp_chuva_mais_proxima_…`) pode estar do lado de fora, sem aparecer na conta. Quando a chuva vem do lado oposto, atravessando a cidade, a borda não atrapalha.
+
+As frentes frias costumam chegar a São Paulo pelo sul e pelo sudoeste. Nesses dias, quem fica perto das bordas sul e oeste (Parelheiros, Embu, Cotia) tende a ter avisos mais curtos do que quem fica no centro ou na zona leste. O atributo `vindo_de` do sensor `chuva_chega_em` mostra de que lado a chuva está vindo.
 
 ## Alagamentos perto de pessoas e lugares
 
@@ -296,6 +355,8 @@ Para usar:
 3. Em **Configurações → Painéis → Adicionar painel → Novo painel do zero**, abra o painel novo, clique no lápis, depois em **⋮ → Editor de configuração bruta**, e cole o conteúdo do arquivo.
 
 Para ver o clima de uma estação no painel, adicione um cartão **Previsão do tempo** com a entidade `weather` dela.
+
+Para ver a chuva e os alagamentos sobre um mapa de ruas, acrescente o card de [`exemplos/card_mapa_chuva.yaml`](https://github.com/luyzfernando08/ha-cgesp/blob/develop/exemplos/card_mapa_chuva.yaml). Ele precisa do ha-map-card, instalado pelo HACS (veja [Chuva no mapa](#chuva-no-mapa)).
 
 ## Exemplos de automação
 

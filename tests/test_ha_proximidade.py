@@ -88,6 +88,46 @@ async def test_ponto_no_mapa(hass: HomeAssistant, site_cge, cache_geo) -> None:
     assert not any("nominatim" in url for url in site_cge.consultas)
 
 
+async def test_pontos_em_geojson(hass: HomeAssistant, site_cge, cache_geo) -> None:
+    """Para cards de mapa que leem GeoJSON de um atributo (ha-map-card)."""
+    await _configurar(hass, **{CONF_GEOCODIFICAR: True})
+
+    atributos = hass.states.get("sensor.cgesp_alagamentos_ativos").attributes
+    # O ponto da fixture é intransitável.
+    assert atributos["geojson_transitaveis"] == {"type": "FeatureCollection", "features": []}
+    geojson = atributos["geojson_intransitaveis"]
+    assert geojson["type"] == "FeatureCollection"
+    (ponto,) = geojson["features"]
+    assert ponto["geometry"] == {"type": "Point", "coordinates": [MARECHAL_TITO[1], MARECHAL_TITO[0]]}
+    propriedades = ponto["properties"]
+    assert propriedades["Local"].startswith("Avenida Marechal Tito")
+    assert propriedades["Bairro"].endswith("(Zona Leste)")
+    assert propriedades["Passagem"] == "intransitável"
+    assert len(propriedades) <= 5  # o card só mostra 5
+
+
+async def test_geojson_transitavel(hass: HomeAssistant, site_cge, cache_geo) -> None:
+    await _configurar(hass, **{CONF_GEOCODIFICAR: True})
+    coordinator = hass.data[DOMAIN]["alertas_coordinator"]
+    for ponto in coordinator.data.pontos_ativos():
+        ponto.transitavel = True
+    coordinator.async_update_listeners()
+    await hass.async_block_till_done()
+
+    atributos = hass.states.get("sensor.cgesp_alagamentos_ativos").attributes
+    assert atributos["geojson_intransitaveis"]["features"] == []
+    (ponto,) = atributos["geojson_transitaveis"]["features"]
+    assert ponto["properties"]["Passagem"] == "transitável"
+
+
+async def test_geojson_vazio_sem_localizacao(hass: HomeAssistant, site_cge) -> None:
+    # Sem a opção do mapa, os pontos não têm coordenadas.
+    await _configurar(hass)
+    atributos = hass.states.get("sensor.cgesp_alagamentos_ativos").attributes
+    assert atributos["geojson_intransitaveis"]["features"] == []
+    assert atributos["geojson_transitaveis"]["features"] == []
+
+
 async def test_ponto_sai_do_mapa_quando_encerra(
     hass: HomeAssistant, site_cge, cache_geo
 ) -> None:

@@ -19,6 +19,7 @@ from .const import (
     DOMAIN,
     TIPO_ALERTAS_CIDADE,
 )
+from .mapa_radar import registrar_mapa_radar
 
 PLATFORMS_ESTACAO: list[Platform] = [
     Platform.WEATHER,
@@ -55,6 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         radar.definir_intervalo_adaptativo(adaptativo)
         await radar.async_refresh()
         hass.data[DOMAIN][DATA_RADAR_COORDINATOR] = radar
+        registrar_mapa_radar(hass)
         await coordinator.async_definir_geocodificacao(
             bool(entry.options.get(CONF_GEOCODIFICAR, False))
         )

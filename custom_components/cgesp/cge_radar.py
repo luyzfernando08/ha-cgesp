@@ -290,6 +290,71 @@ class LeituraRadar:
     def tem_chuva(self) -> bool:
         return bool(self._indices_com_chuva)
 
+    def bloco_do_mapa(self, zoom: int, x: int, y: int) -> bytes:
+        """Bloco de mapa (PNG de 256 x 256, no esquema {z}/{x}/{y} dos mapas
+        web) só com a chuva, nas cores da legenda, e o resto transparente."""
+        escala = TAMANHO_BLOCO * 2**zoom
+        x0, y0, x1, y1 = _AREA
+        lx0, ly0, lx1, ly1 = _LEGENDA
+
+        # Longitude só depende da coluna do bloco, e latitude só da linha:
+        # basta achar a célula de cada coluna e de cada linha uma vez.
+        colunas: list[int] = []
+        na_legenda_x: list[bool] = []
+        for i in range(TAMANHO_BLOCO):
+            longitude = (x * TAMANHO_BLOCO + i + 0.5) / escala * 360 - 180
+            px = _X0 + (longitude - _LON0) * _PX_LON
+            colunas.append(int((px - x0) // CELULA) if x0 <= px < x1 else -1)
+            na_legenda_x.append(lx0 <= px <= lx1)
+        if max(colunas) < 0:
+            return BLOCO_VAZIO
+
+        dados = bytearray(TAMANHO_BLOCO * TAMANHO_BLOCO)
+        algo = False
+        linhas_prontas: dict[tuple[int, bool], bytes] = {}
+        for j in range(TAMANHO_BLOCO):
+            n = math.pi * (1 - 2 * (y * TAMANHO_BLOCO + j + 0.5) / escala)
+            latitude = math.degrees(math.atan(math.sinh(n)))
+            py = _Y0 + (_LAT0 - latitude) * _PX_LAT
+            if not y0 <= py < y1:
+                continue
+            linha = int((py - y0) // CELULA)
+            legenda = ly0 <= py <= ly1
+            pronta = linhas_prontas.get((linha, legenda))
+            if pronta is None:
+                inicio = linha * self.colunas
+                celulas = self.celulas[inicio : inicio + self.colunas]
+                pronta = bytes(
+                    celulas[c] if c >= 0 and not (legenda and na_legenda_x[i]) else 0
+                    for i, c in enumerate(colunas)
+                )
+                linhas_prontas[(linha, legenda)] = pronta
+            if any(pronta):
+                algo = True
+                dados[j * TAMANHO_BLOCO : (j + 1) * TAMANHO_BLOCO] = pronta
+        if not algo:
+            return BLOCO_VAZIO
+        return _png_do_bloco(bytes(dados))
+
+
+# ---- Blocos de mapa ---------------------------------------------------------
+TAMANHO_BLOCO = 256
+
+
+def _png_do_bloco(dados: bytes) -> bytes:
+    """PNG com paleta: índice = nível da chuva; 0 (sem chuva) é transparente."""
+    imagem = Image.frombytes("P", (TAMANHO_BLOCO, TAMANHO_BLOCO), dados)
+    paleta = [0, 0, 0]
+    for nivel in (FRACA, MODERADA, FORTE, MUITO_FORTE):
+        paleta += list(_CORES[nivel])
+    imagem.putpalette(paleta)
+    saida = io.BytesIO()
+    imagem.save(saida, "PNG", transparency=0, optimize=True)
+    return saida.getvalue()
+
+
+BLOCO_VAZIO = _png_do_bloco(bytes(TAMANHO_BLOCO * TAMANHO_BLOCO))
+
 
 def _na_legenda(x: float, y: float) -> bool:
     x0, y0, x1, y1 = _LEGENDA

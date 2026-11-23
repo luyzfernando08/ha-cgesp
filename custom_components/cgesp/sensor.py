@@ -4,10 +4,11 @@ Estações: estado de alerta da área monitorada.
 Alertas da cidade: contadores de alagamentos, último boletim do CGE e, para
 cada pessoa, rastreador ou zona escolhida, alagamentos por perto e a chuva no
 local pelo radar (intensidade, distância até a chuva mais próxima e em quantos
-minutos a chuva deve chegar).
+minutos a chuva deve chegar). Também a hora da última imagem do radar.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -57,6 +58,8 @@ PREFIXO_PROXIMIDADE = "cgesp_proximidade_"
 PREFIXO_CHUVA = "cgesp_chuva_"
 PREFIXO_CHUVA_PROXIMA = "cgesp_chuva_mais_proxima_"
 PREFIXO_CHUVA_CHEGA = "cgesp_chuva_chega_em_"
+ATRIBUTO_GEOJSON_INTRANSITAVEIS = "geojson_intransitaveis"
+ATRIBUTO_GEOJSON_TRANSITAVEIS = "geojson_transitaveis"
 
 
 async def async_setup_entry(
@@ -76,6 +79,8 @@ async def async_setup_entry(
         geocodificar = bool(entry.options.get(CONF_GEOCODIFICAR, False))
         acompanhadas = list(entry.options.get(CONF_ENTIDADES_PROXIMIDADE, []))
         radar = obter_radar(hass)
+        if radar is not None:
+            entidades.append(CgeRadarHorarioSensor(radar))
         por_entidade: list[SensorEntity] = []
         for entidade in acompanhadas:
             # Alagamentos perto só com os pontos no mapa (precisa das coordenadas).
@@ -144,6 +149,10 @@ class CgeAlagamentosAtivosSensor(_CgeAlagamentosEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UNIDADE_PONTOS
     _attr_icon = "mdi:home-flood"
+    # Os pontos no mapa mudam a cada atualização: não vão para o histórico.
+    _unrecorded_attributes = frozenset(
+        {ATRIBUTO_GEOJSON_INTRANSITAVEIS, ATRIBUTO_GEOJSON_TRANSITAVEIS}
+    )
 
     def __init__(self, coordinator: CgeAlertasCoordinator, zona: str | None) -> None:
         super().__init__(coordinator)
@@ -173,7 +182,37 @@ class CgeAlagamentosAtivosSensor(_CgeAlagamentosEntity, SensorEntity):
                 nome: sum(1 for p in self.dados.pontos_da_zona(zona) if p.ativo)
                 for zona, nome in ZONAS.items()
             },
+            # Pontos localizados, para cards de mapa que leem GeoJSON (como o
+            # ha-map-card), separados para cada tipo ter a sua cor.
+            ATRIBUTO_GEOJSON_INTRANSITAVEIS: self._geojson(transitavel=False),
+            ATRIBUTO_GEOJSON_TRANSITAVEIS: self._geojson(transitavel=True),
         }
+
+    def _geojson(self, transitavel: bool) -> dict[str, Any]:
+        return {
+            "type": "FeatureCollection",
+            "features": [
+                _ponto_geojson(ponto)
+                for ponto in self.dados.pontos_ativos()
+                if ponto.localizado and ponto.transitavel == transitavel
+            ],
+        }
+
+
+def _ponto_geojson(ponto: PontoAlagamento) -> dict[str, Any]:
+    # O ha-map-card mostra as 5 primeiras propriedades ao passar o mouse.
+    propriedades = {
+        "Local": ponto.local,
+        "Bairro": f"{ponto.bairro} ({ZONAS.get(ponto.zona, ponto.zona)})",
+        "Desde": ponto.inicio,
+        "Passagem": "transitável" if ponto.transitavel else "intransitável",
+        "Referência": ponto.referencia,
+    }
+    return {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [ponto.longitude, ponto.latitude]},
+        "properties": {chave: valor for chave, valor in propriedades.items() if valor},
+    }
 
 
 class CgeAlagamentosHojeSensor(_CgeAlagamentosEntity, SensorEntity):
@@ -314,6 +353,29 @@ class CgeProximidadeSensor(EntidadeAcompanhada, _CgeAlagamentosEntity, SensorEnt
 
 def _atualizado_em(leitura) -> Any:
     return dt_util.as_local(leitura.obtida_em)
+
+
+class CgeRadarHorarioSensor(CgeRadarEntity, SensorEntity):
+    """Hora da imagem do radar (a do título; a de publicação se não der para
+    ler). Muda a cada imagem nova: serve para cards recarregarem a camada de
+    chuva do mapa."""
+
+    _attr_name = "Horário do radar"
+    _attr_unique_id = "cgesp_radar_horario"
+    _attr_icon = "mdi:radar"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: CgeRadarCoordinator) -> None:
+        super().__init__(coordinator)
+        self.entity_id = "sensor.cgesp_radar_horario"
+
+    @property
+    def native_value(self) -> datetime:
+        return self.leitura.horario or self.leitura.obtida_em
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"publicado_em": _atualizado_em(self.leitura)}
 
 
 class CgeChuvaSensor(EntidadeAcompanhada, CgeRadarEntity, SensorEntity):
