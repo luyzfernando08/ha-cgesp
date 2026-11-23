@@ -264,6 +264,58 @@ async def test_chuva_chegando(hass: HomeAssistant, site_cge, freezer) -> None:
     assert radar.attributes["horario_do_radar"] == datetime(2026, 11, 22, 20, 30, tzinfo=UTC)
 
 
+RIACHO_GRANDE = (-23.903, -46.492)  # chovendo em radar_movimento_1730; para em ~24 min
+BORDA_OESTE = (-23.809, -46.849)  # chovendo, com mais chuva a oeste, fora da imagem
+PARA_CASA = "sensor.cgesp_chuva_para_em_zone_home"
+
+
+async def test_chuva_parando(hass: HomeAssistant, site_cge, freezer) -> None:
+    freezer.move_to("2026-11-22T20:32:00+00:00")
+    _casa(hass, RIACHO_GRANDE)
+    site_cge.paginas[URL_RADAR] = site_cge.fixture("radar_movimento_1720.jpg")
+    site_cge.modificado[URL_RADAR] = "Sun, 22 Nov 2026 20:31:47 GMT"
+    await _configurar(hass)
+    # Na imagem das 17:20 ainda não chovia lá.
+    assert hass.states.get(PARA_CASA).attributes["motivo"] == "não está chovendo no local"
+
+    freezer.move_to("2026-11-22T20:38:00+00:00")
+    await _chuva_de_22_11(hass, site_cge, "radar_movimento_1730.jpg", "Sun, 22 Nov 2026 20:37:19 GMT")
+
+    assert hass.states.get(CHOVENDO_CASA).state == STATE_ON
+    para = hass.states.get(PARA_CASA)
+    assert float(para.state) == pytest.approx(24, abs=3)
+    assert para.attributes["para_as"] == pytest.approx(
+        datetime(2026, 11, 22, 21, 2, tzinfo=UTC), abs=timedelta(minutes=3)
+    )
+    assert para.attributes["friendly_name"].endswith("Chuva para em Casa")
+    assert para.attributes["unit_of_measurement"] == "min"
+    assert para.attributes["device_class"] == "duration"
+    assert para.attributes["intensidade_maxima"] == "forte"
+    assert para.attributes["vindo_de"] == "oeste"
+    assert "motivo" not in para.attributes
+
+
+async def test_chuva_parando_sem_resposta(hass: HomeAssistant, site_cge, freezer) -> None:
+    freezer.move_to("2026-11-22T20:38:00+00:00")
+    _casa(hass, PAULISTA)
+    site_cge.paginas[URL_RADAR] = site_cge.fixture("radar_movimento_1720.jpg")
+    site_cge.modificado[URL_RADAR] = "Sun, 22 Nov 2026 20:31:47 GMT"
+    await _configurar(hass)
+    await _chuva_de_22_11(hass, site_cge, "radar_movimento_1730.jpg", "Sun, 22 Nov 2026 20:37:19 GMT")
+
+    # Sem chuva no local: não há o que parar.
+    para = hass.states.get(PARA_CASA)
+    assert para.state == STATE_UNKNOWN
+    assert para.attributes["motivo"] == "não está chovendo no local"
+
+    # Chovendo, mas a chuva que vem depois ainda está fora da imagem.
+    _casa(hass, BORDA_OESTE)
+    await hass.async_block_till_done()
+    para = hass.states.get(PARA_CASA)
+    assert para.state == STATE_UNKNOWN
+    assert "fora da área do radar" in para.attributes["motivo"]
+
+
 async def test_chuva_que_nao_vem(hass: HomeAssistant, site_cge, freezer) -> None:
     freezer.move_to("2026-11-22T20:38:00+00:00")
     _casa(hass, PAULISTA)

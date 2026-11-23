@@ -22,6 +22,7 @@ from custom_components.cgesp.cge_radar import (
     SEM_CHUVA,
     AnimacaoRadar,
     LeituraRadar,
+    Movimento,
     RadarImagemInvalida,
     RadarLayoutError,
     horario_do_radar,
@@ -428,3 +429,75 @@ def test_legenda_nao_vira_chuva() -> None:
     legenda = (-23.99, -46.40)
     x, y, _, _ = bloco_e_pixel(*legenda, zoom=10)
     assert leitura.bloco_do_mapa(10, x, y) == BLOCO_VAZIO
+
+
+# ------------------------------------------------------------------ fim da chuva
+
+
+def _no_bloco(px_do_centro: int) -> tuple[float, float]:
+    """Ponto dentro do bloco já deslocado, `px_do_centro` pixels a leste do centro."""
+    x, y = _pixel(*BLOCO)
+    x += ANDOU_PX + px_do_centro
+    return -23.4 - (y - 139.31) / 1284.5, -46.8 + (x - 118.58) / 1176.5
+
+
+def test_fim_da_chuva(bloco_andando: LeituraRadar) -> None:
+    # No centro do bloco, a borda de trás está a 24 px = 6 células; a 0,6
+    # célula por minuto, a chuva para em uns 10 minutos.
+    fim = bloco_andando.fim_da_chuva(*_no_bloco(0))
+
+    assert fim.minutos == pytest.approx(10, abs=2)
+    assert fim.para_as == bloco_andando.horario + timedelta(minutes=fim.minutos)
+    assert fim.intensidade_maxima == "moderada"
+    assert not fim.chuva_de_fora
+
+
+def test_fim_da_chuva_desconta_o_atraso(bloco_andando: LeituraRadar) -> None:
+    # Perto da borda leste: 11 células de chuva atrás, uns 18 minutos. A
+    # imagem já tem 5 minutos, então faltam uns 13.
+    ponto = _no_bloco(20)
+    sem_atraso = bloco_andando.fim_da_chuva(*ponto)
+    com_atraso = bloco_andando.fim_da_chuva(
+        *ponto, agora=bloco_andando.horario + timedelta(minutes=5)
+    )
+
+    assert sem_atraso.minutos == pytest.approx(18, abs=2)
+    assert com_atraso.minutos == sem_atraso.minutos - 5
+    assert com_atraso.para_as == sem_atraso.para_as
+
+
+def test_chuva_que_ja_passou(bloco_andando: LeituraRadar) -> None:
+    # Bem depois da imagem, a chuva já saiu do ponto: 0.
+    fim = bloco_andando.fim_da_chuva(
+        *_no_bloco(0), agora=bloco_andando.horario + timedelta(minutes=30)
+    )
+    assert fim.minutos == 0
+
+
+def test_chuva_que_nao_para_no_horizonte(bloco_andando: LeituraRadar) -> None:
+    fim = bloco_andando.fim_da_chuva(*_no_bloco(20), horizonte=5)
+    assert fim.minutos is None
+    assert fim.para_as is None
+    assert not fim.chuva_de_fora
+
+
+def test_chuva_vindo_de_fora_da_imagem(chuva: LeituraRadar) -> None:
+    # Chuva na imagem inteira, andando para leste: a que vem depois está a
+    # oeste, fora da imagem. Não dá para saber quando para.
+    tudo = LeituraRadar(
+        imagem=b"",
+        obtida_em=HORARIO,
+        celulas=bytes([FRACA]) * (chuva.colunas * chuva.linhas),
+        colunas=chuva.colunas,
+        linhas=chuva.linhas,
+        horario=HORARIO,
+        movimento=Movimento(vx=3, vy=0, confianca=1, minutos=10),
+    )
+    fim = tudo.fim_da_chuva(*PAULISTA)
+    assert fim.minutos is None
+    assert fim.chuva_de_fora
+
+
+def test_fim_sem_movimento_ou_fora(chuva: LeituraRadar) -> None:
+    assert chuva.fim_da_chuva(*PAULISTA) is None  # sem movimento medido
+    assert _com_bloco(0, INICIO).fim_da_chuva(*CAMPINAS) is None

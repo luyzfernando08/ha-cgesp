@@ -4,7 +4,7 @@ Estações: estado de alerta da área monitorada.
 Alertas da cidade: contadores de alagamentos, último boletim do CGE e, para
 cada pessoa, rastreador ou zona escolhida, alagamentos por perto e a chuva no
 local pelo radar (intensidade, distância até a chuva mais próxima e em quantos
-minutos a chuva deve chegar). Também a hora da última imagem do radar.
+minutos a chuva deve chegar ou parar). Também a hora da última imagem do radar.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from .cge_alertas_coordinator import (
     async_obter_coordinator,
 )
 from .cge_extras import pontos_proximos
-from .cge_radar import FORTE, HORIZONTE_PREVISAO, NIVEIS, ChegadaChuva
+from .cge_radar import FORTE, HORIZONTE_PREVISAO, NIVEIS, SEM_CHUVA, ChegadaChuva, FimChuva
 from .cge_radar_coordinator import CgeRadarCoordinator
 from .const import (
     CONF_ENTIDADES_PROXIMIDADE,
@@ -58,6 +58,7 @@ PREFIXO_PROXIMIDADE = "cgesp_proximidade_"
 PREFIXO_CHUVA = "cgesp_chuva_"
 PREFIXO_CHUVA_PROXIMA = "cgesp_chuva_mais_proxima_"
 PREFIXO_CHUVA_CHEGA = "cgesp_chuva_chega_em_"
+PREFIXO_CHUVA_PARA = "cgesp_chuva_para_em_"
 ATRIBUTO_GEOJSON_INTRANSITAVEIS = "geojson_intransitaveis"
 ATRIBUTO_GEOJSON_TRANSITAVEIS = "geojson_transitaveis"
 
@@ -90,11 +91,18 @@ async def async_setup_entry(
                 por_entidade.append(CgeChuvaSensor(radar, entidade))
                 por_entidade.append(CgeChuvaProximaSensor(radar, entidade))
                 por_entidade.append(CgeChuvaChegaSensor(radar, entidade))
+                por_entidade.append(CgeChuvaParaSensor(radar, entidade))
         remover_orfas(
             hass,
             entry,
             "sensor",
-            (PREFIXO_PROXIMIDADE, PREFIXO_CHUVA, PREFIXO_CHUVA_PROXIMA, PREFIXO_CHUVA_CHEGA),
+            (
+                PREFIXO_PROXIMIDADE,
+                PREFIXO_CHUVA,
+                PREFIXO_CHUVA_PROXIMA,
+                PREFIXO_CHUVA_CHEGA,
+                PREFIXO_CHUVA_PARA,
+            ),
             {e.unique_id for e in por_entidade if e.unique_id},
         )
         async_add_entities([*entidades, *por_entidade])
@@ -525,6 +533,71 @@ class CgeChuvaChegaSensor(EntidadeAcompanhada, CgeRadarEntity, SensorEntity):
             "radar_atualizado_em": _atualizado_em(self.leitura),
             "chega_as": dt_util.as_local(chegada.chega_as) if chegada else None,
             "intensidade_maxima": chegada.intensidade_maxima if chegada else None,
+            "vindo_de": movimento.vindo_de if movimento else None,
+            "velocidade_kmh": round(movimento.velocidade_kmh) if movimento else None,
+        }
+        if motivo:
+            atributos["motivo"] = motivo
+        return atributos
+
+
+class CgeChuvaParaSensor(EntidadeAcompanhada, CgeRadarEntity, SensorEntity):
+    """Em quantos minutos a chuva deve parar na pessoa, rastreador ou zona,
+    enquanto está chovendo lá, pelo movimento da chuva entre as últimas
+    imagens do radar."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_suggested_display_precision = 0
+    _attr_icon = "mdi:weather-partly-rainy"
+
+    def __init__(self, coordinator: CgeRadarCoordinator, entidade: str) -> None:
+        super().__init__(coordinator)
+        self._acompanhar(entidade)
+        self._attr_unique_id = f"{PREFIXO_CHUVA_PARA}{entidade}"
+        self.entity_id = f"sensor.cgesp_chuva_para_em_{self.sufixo}"
+
+    @property
+    def name(self) -> str:
+        return f"Chuva para em {self._nome_da_entidade()}"
+
+    def _fim(self) -> tuple[FimChuva | None, str | None]:
+        posicao = self._posicao()
+        if posicao is None:
+            return None, self._sem_posicao()
+        leitura = self.leitura
+        nivel = leitura.nivel_em(*posicao)
+        if nivel is None:
+            return None, "fora da área coberta pela imagem do radar"
+        if nivel == SEM_CHUVA:
+            return None, "não está chovendo no local"
+        if leitura.movimento is None:
+            return None, "movimento da chuva ainda não medido (precisa de duas imagens com chuva)"
+        fim = leitura.fim_da_chuva(*posicao, agora=dt_util.utcnow())
+        if fim is None:
+            return None, "não deu para calcular"
+        if fim.chuva_de_fora:
+            return fim, "a chuva que vem depois ainda está fora da área do radar"
+        if fim.minutos is None:
+            return fim, f"a chuva deve continuar por mais de {HORIZONTE_PREVISAO} minutos"
+        return fim, None
+
+    @property
+    def native_value(self) -> int | None:
+        fim, _ = self._fim()
+        return None if fim is None else fim.minutos
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        fim, motivo = self._fim()
+        movimento = self.leitura.movimento
+        atributos: dict[str, Any] = {
+            "entidade": self.entidade,
+            "radar_atualizado_em": _atualizado_em(self.leitura),
+            "para_as": dt_util.as_local(fim.para_as) if fim and fim.para_as else None,
+            "intensidade_maxima": (
+                fim.intensidade_maxima if fim and fim.nivel_maximo != SEM_CHUVA else None
+            ),
             "vindo_de": movimento.vindo_de if movimento else None,
             "velocidade_kmh": round(movimento.velocidade_kmh) if movimento else None,
         }

@@ -52,6 +52,15 @@ views:
               ## 🌧️ Chovendo em casa
 
               Chuva **{{ nomes[agora] }}** agora.
+              {% set para = 'sensor.cgesp_chuva_para_em_zone_home' %}
+              {% set para_min = states(para) %}
+              {% if para_min not in ['unavailable', 'unknown'] %}
+
+              ⏱️ Deve parar **{{ 'a qualquer momento' if para_min | int == 0 else 'em uns ' ~ (para_min | int) ~ ' min' }}**{% if state_attr(para, 'para_as') %} (por volta das {{ as_timestamp(state_attr(para, 'para_as')) | timestamp_custom('%H:%M') }}){% endif %}.
+              {% elif 'continuar' in (state_attr(para, 'motivo') or '') %}
+
+              ⏱️ Deve continuar chovendo por mais de uma hora.
+              {% endif %}
               {% elif km not in ['unavailable', 'unknown'] %}
               ## 🌥️ Sem chuva em casa
 
@@ -318,6 +327,8 @@ views:
                 name: Intensidade em casa
               - entity: sensor.cgesp_chuva_chega_em_zone_home
                 name: Chuva chega em
+              - entity: sensor.cgesp_chuva_para_em_zone_home
+                name: Chuva para em
           - type: statistics-graph
             title: Alagamentos por zona (máximo do dia)
             chart_type: bar

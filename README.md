@@ -8,7 +8,7 @@ Traz para o Home Assistant os dados do [CGE](https://www.cgesp.org/v3/), o Centr
 - **Alagamentos por zona:** um sensor para cada zona (Norte, Sul, Leste, Oeste e Centro) que liga quando há alagamento ativo, com os bairros e as ruas afetadas.
 - **Estado de alerta da sua região:** o mesmo estado que o CGE mostra no mapa da página inicial (Observação, Atenção, Iminência de transbordamento ou Alerta), com o horário da última atualização do mapa.
 - **Alagamentos no mapa (opcional):** cada ponto alagado aparece no cartão de mapa do Home Assistant.
-- **Chuva em casa, agora e daqui a pouco:** para cada pessoa, rastreador ou zona que você escolher, o radar diz se está chovendo no local, com qual intensidade, a que distância está a chuva mais próxima e **em quantos minutos ela deve chegar**, pelo movimento da chuva entre as últimas imagens.
+- **Chuva em casa, agora e daqui a pouco:** para cada pessoa, rastreador ou zona que você escolher, o radar diz se está chovendo no local, com qual intensidade, a que distância está a chuva mais próxima, **em quantos minutos ela deve chegar** e, enquanto chove, **em quantos minutos deve parar**, pelo movimento da chuva entre as últimas imagens.
 - **Alagamentos perto de quem você quiser:** um sensor por pessoa, rastreador ou zona, com quantos alagamentos estão a menos de X km. Ele acompanha a pessoa enquanto ela se move.
 - **Contadores:** alagamentos ativos na cidade e em cada zona, e quantos houve no dia. Eles entram nas estatísticas do HA, então dá para fazer gráficos.
 - **Boletim do CGE:** o texto mais recente publicado pelo CGE, com a tendência para os próximos dias.
@@ -267,6 +267,7 @@ A integração lê a imagem do radar e descobre a chuva no ponto exato de cada u
 | `sensor.cgesp_chuva_zone_home` | A intensidade no local: sem chuva, fraca, moderada, forte ou muito forte |
 | `sensor.cgesp_chuva_mais_proxima_zone_home` | Distância em km até a chuva mais próxima (0 quando está chovendo no local) |
 | `sensor.cgesp_chuva_chega_em_zone_home` | Em quantos minutos a chuva deve chegar (0 quando já está chovendo no local) |
+| `sensor.cgesp_chuva_para_em_zone_home` | Enquanto chove no local, em quantos minutos a chuva deve parar |
 
 O sensor de distância também traz nos atributos a `intensidade` e a `direcao` dessa chuva (norte, nordeste, leste…), e `chuva_forte_km` e `chuva_forte_direcao` para a chuva forte ou muito forte mais próxima. Quando não há chuva em nenhum lugar da imagem, a distância fica *desconhecida*.
 
@@ -281,6 +282,27 @@ O servidor publica cada imagem do radar de 7 a 15 minutos depois de ela ser feit
 Numa chuva de novembro de 2026, conferida contra as imagens seguintes do radar, de cada 10 locais em que a integração previu chuva, 9 tiveram chuva de verdade, e o horário de chegada errou em 3 minutos na metade dos casos e em até 8 minutos em 80% deles. Isso vale para chuva que já existe e está andando, como frentes e linhas de chuva. **Ela não prevê chuva que ainda vai se formar**: muitas pancadas de verão nascem no lugar em poucos minutos, sem aparecer antes no radar. Use como aviso, não como garantia.
 
 Logo depois de o HA iniciar, ou quando a chuva acabou de aparecer no radar, o sensor fica *desconhecido* até haver duas imagens com chuva (uns 5 a 10 minutos).
+
+### Quando a chuva para
+
+Enquanto está chovendo no local, `sensor.cgesp_chuva_para_em_…` diz em quantos minutos a chuva deve parar. A conta é a mesma da chegada, ao contrário: a integração empurra a chuva na direção em que ela anda e vê quando o local fica seco por pelo menos 10 minutos seguidos. Um vão curto entre duas manchas de chuva não conta como fim.
+
+O sensor também traz `para_as` (o horário previsto), `intensidade_maxima` (a chuva mais forte prevista no local até parar), `vindo_de` e `velocidade_kmh`. Quando não dá para responder, ele fica *desconhecido*, com o motivo no atributo `motivo`:
+
+| Motivo | Quando |
+|---|---|
+| não está chovendo no local | Não há o que parar. Veja o sensor de chegada |
+| a chuva deve continuar por mais de 60 minutos | Ainda há chuva atrás chegando até o fim da próxima hora |
+| a chuva que vem depois ainda está fora da área do radar | A chuva continua além da borda da imagem, e não dá para ver onde ela acaba. É comum perto das bordas (veja [Área coberta pelo radar](#área-coberta-pelo-radar)) |
+
+O valor 0 quer dizer que, pela conta, a chuva já deve ter passado: a imagem do radar tem uns 10 minutos de atraso, e às vezes a chuva que aparece nela já foi embora.
+
+Na mesma chuva de novembro de 2026, conferida contra as imagens seguintes:
+
+- **Chuva já formada:** a hora prevista para o fim errou em 3 a 10 minutos na metade dos casos, sem tendência para cedo ou para tarde.
+- **Chuva ainda se formando:** a previsão dizia que ia parar uns 15 a 20 minutos antes do que parou de verdade, porque a chuva que vinha atrás ainda não existia no radar.
+
+Por isso, no começo de uma chuva, conte com um fim mais tarde do que o sensor mostra.
 
 Para pessoas, o nome não leva o tipo: `person.joao` vira `binary_sensor.cgesp_chovendo_joao`. Os sensores são recalculados quando a pessoa se move e a cada imagem nova do radar.
 
@@ -447,6 +469,30 @@ automation:
             Chuva {{ state_attr('sensor.cgesp_chuva_chega_em_zone_home', 'intensidade_maxima') }}
             em uns {{ states('sensor.cgesp_chuva_chega_em_zone_home') }} minutos,
             vindo de {{ state_attr('sensor.cgesp_chuva_chega_em_zone_home', 'vindo_de') }}.
+```
+
+### Chuva parando em casa
+
+Avisa quando a chuva deve parar nos próximos 10 minutos (por exemplo, para recolher a roupa de novo ou sair de casa):
+
+```yaml
+automation:
+  - alias: Chuva parando
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.cgesp_chuva_para_em_zone_home
+        below: 10
+    condition:
+      - condition: state
+        entity_id: binary_sensor.cgesp_chovendo_zone_home
+        state: "on"
+    action:
+      - service: notify.mobile_app_seu_celular
+        data:
+          title: Chuva parando
+          message: >
+            A chuva deve parar em uns {{ states('sensor.cgesp_chuva_para_em_zone_home') }} minutos,
+            por volta das {{ as_timestamp(state_attr('sensor.cgesp_chuva_para_em_zone_home', 'para_as')) | timestamp_custom('%H:%M') }}.
 ```
 
 ### Chuva forte chegando

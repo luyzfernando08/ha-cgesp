@@ -94,6 +94,8 @@ INTERVALO_MOVIMENTO_IDEAL = timedelta(minutes=10)
 _VELOCIDADE_MAXIMA_KMH = 100
 _FATOR_GROSSO = 3  # a busca começa numa grade 3x mais grossa
 HORIZONTE_PREVISAO = 60  # minutos
+# Minutos seguidos sem chuva para a chuva contar como parada.
+SECO_MINIMO = 10
 _CONFIANCA_MINIMA = 0.5
 
 # Animação.
@@ -158,6 +160,21 @@ class ChegadaChuva:
     nivel_maximo: int  # a mais forte prevista no ponto dentro do horizonte
     movimento: Movimento
     chega_as: datetime
+
+    @property
+    def intensidade_maxima(self) -> str:
+        return NIVEIS[self.nivel_maximo]
+
+
+@dataclass(frozen=True)
+class FimChuva:
+    # A partir de agora; 0 = já deve ter parado. None: não para dentro do
+    # horizonte, ou a chuva que vem depois está fora da imagem.
+    minutos: int | None
+    nivel_maximo: int  # a mais forte prevista no ponto até parar
+    movimento: Movimento
+    para_as: datetime | None
+    chuva_de_fora: bool = False
 
     @property
     def intensidade_maxima(self) -> str:
@@ -267,6 +284,54 @@ class LeituraRadar:
             return None
         return ChegadaChuva(
             chegada - atraso, maximo, movimento, self.horario + timedelta(minutes=chegada)
+        )
+
+    def fim_da_chuva(
+        self,
+        latitude: float,
+        longitude: float,
+        agora: datetime | None = None,
+        horizonte: int = HORIZONTE_PREVISAO,
+    ) -> FimChuva | None:
+        """Em quantos minutos a partir de `agora` a chuva deve parar no ponto,
+        com a mesma conta de `chegada_da_chuva`: o fim é o primeiro minuto
+        seco seguido de pelo menos `SECO_MINIMO` minutos sem chuva (um vão
+        entre duas manchas não conta). None sem movimento medido ou fora da
+        imagem."""
+        celula = self._celula(latitude, longitude)
+        movimento = self.movimento
+        if celula is None or movimento is None or self.horario is None:
+            return None
+        atraso = 0
+        if agora is not None:
+            atraso = max(0, round((agora - self.horario).total_seconds() / 60))
+        coluna, linha = celula
+        maximo = SEM_CHUVA
+        seco_desde: int | None = None
+        for minuto in range(atraso, atraso + horizonte + SECO_MINIMO + 1):
+            nivel = self._nivel_celula(
+                round(coluna - movimento.vx * minuto), round(linha - movimento.vy * minuto)
+            )
+            if nivel is None:
+                # A chuva que vem depois ainda está fora da imagem.
+                if seco_desde is not None:
+                    break  # já tinha parado; o resto é incerto, mas ficou seco
+                return FimChuva(None, maximo, movimento, None, chuva_de_fora=True)
+            if nivel:
+                seco_desde = None
+                if minuto - atraso <= horizonte:
+                    maximo = max(maximo, nivel)
+                continue
+            if seco_desde is None:
+                if minuto - atraso > horizonte:
+                    break  # ainda chovendo no fim do horizonte
+                seco_desde = minuto
+            if minuto - seco_desde >= SECO_MINIMO:
+                break
+        if seco_desde is None:
+            return FimChuva(None, maximo, movimento, None)
+        return FimChuva(
+            seco_desde - atraso, maximo, movimento, self.horario + timedelta(minutes=seco_desde)
         )
 
     def _nivel_celula(self, coluna: int, linha: int) -> int | None:
